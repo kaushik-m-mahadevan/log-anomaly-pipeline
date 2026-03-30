@@ -1,10 +1,11 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
 FROM maven:3.9.6-eclipse-temurin-21-alpine AS builder
-WORKDIR /app
-COPY pom.xml .
 # Cache dependencies before copying source (layer cache optimization)
+WORKDIR /app/log-ingestion-service
+COPY pom.xml ../pom.xml
+COPY log-ingestion-service/pom.xml .
 RUN mvn dependency:go-offline -q
-COPY src ./src
+COPY log-ingestion-service/src ./src
 RUN mvn clean package -DskipTests -q
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
@@ -15,7 +16,7 @@ WORKDIR /app
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
-COPY --from=builder /app/target/*.jar app.jar
+COPY --from=builder /app/log-ingestion-service/target/*.jar app.jar
 
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]

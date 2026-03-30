@@ -45,10 +45,13 @@ public class LogPublisherService {
     public List<CompletableFuture<SendResult<String, LogEventMessage>>> publishBatch(
             List<LogEventRequest> requests) {
 
-        return requests.stream()
+        log.info("Starting to publish batch of {} log events to topic {}", requests.size(), processedLogsTopic);
+        List<CompletableFuture<SendResult<String, LogEventMessage>>> futures = requests.stream()
                 .map(this::toMessage)
                 .map(this::publish)
                 .toList();
+        log.info("Completed setting up publication for {} events", requests.size());
+        return futures;
     }
 
     private LogEventMessage toMessage(LogEventRequest request) {
@@ -75,7 +78,7 @@ public class LogPublisherService {
                 log.error("Failed to publish log event [eventId={}, serviceId={}]: {}",
                         message.eventId(), message.serviceId(), ex.getMessage());
             } else {
-                log.debug("Published log event [eventId={}, serviceId={}, partition={}, offset={}]",
+                log.info("Successfully published log event [eventId={}, serviceId={}, partition={}, offset={}]",
                         message.eventId(), message.serviceId(),
                         result.getRecordMetadata().partition(),
                         result.getRecordMetadata().offset());

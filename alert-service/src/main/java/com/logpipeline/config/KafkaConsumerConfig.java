@@ -25,27 +25,30 @@ public class KafkaConsumerConfig {
     private String groupId;
 
     @Bean
-    public ConsumerFactory<String, AnomalyEvent> alertConsumerFactory() {
+    public ConsumerFactory<String, AnomalyEvent> consumerFactory() {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        JsonDeserializer<AnomalyEvent> deserializer = new JsonDeserializer<>(AnomalyEvent.class, mapper);
+        JsonDeserializer<AnomalyEvent> deserializer =
+                new JsonDeserializer<>(AnomalyEvent.class, mapper);
+        deserializer.addTrustedPackages("*");
         deserializer.setUseTypeHeaders(false);
 
         return new DefaultKafkaConsumerFactory<>(Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                 ConsumerConfig.GROUP_ID_CONFIG, groupId,
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, true  // auto-commit, no manual ack needed
         ), new StringDeserializer(), deserializer);
     }
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, AnomalyEvent>
             alertKafkaListenerContainerFactory(
-                    ConsumerFactory<String, AnomalyEvent> alertConsumerFactory) {
+                    ConsumerFactory<String, AnomalyEvent> consumerFactory) {
 
         ConcurrentKafkaListenerContainerFactory<String, AnomalyEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(alertConsumerFactory);
+        factory.setConsumerFactory(consumerFactory);
+        // no AckMode — auto-commit handles offsets cleanly
         return factory;
     }
 }

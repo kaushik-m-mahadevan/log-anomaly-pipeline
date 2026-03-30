@@ -1,10 +1,9 @@
 package com.logpipeline.controller;
 
+import com.logpipeline.dto.LogEventBatchRequest;
 import com.logpipeline.dto.LogEventRequest;
 import com.logpipeline.service.LogPublisherService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.Size;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -40,10 +39,17 @@ public class LogIngestionController {
 
     @PostMapping("/batch")
     public ResponseEntity<Map<String, Object>> ingestBatch(
-            @RequestBody @NotEmpty @Size(max = MAX_BATCH_SIZE) List<@Valid LogEventRequest> requests) {
+            @RequestBody @Valid LogEventBatchRequest batch) {
+
+        List<LogEventRequest> requests = batch.events();
+
+        if (requests.size() > MAX_BATCH_SIZE) {
+            throw new IllegalArgumentException("Batch size exceeds maximum of " + MAX_BATCH_SIZE);
+        }
 
         log.info("Received batch of {} log events", requests.size());
         publisherService.publishBatch(requests);
+        log.info("Published batch of {} log events to Kafka", requests.size());
 
         return ResponseEntity
                 .status(HttpStatus.ACCEPTED)   // 202: accepted for async processing, not yet committed
@@ -60,6 +66,6 @@ public class LogIngestionController {
     @PostMapping
     public ResponseEntity<Map<String, Object>> ingestSingle(
             @RequestBody @Valid LogEventRequest request) {
-        return ingestBatch(List.of(request));
+        return ingestBatch(new LogEventBatchRequest(List.of(request)));
     }
 }

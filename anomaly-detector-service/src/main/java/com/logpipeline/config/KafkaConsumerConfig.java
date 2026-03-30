@@ -1,5 +1,8 @@
 package com.logpipeline.config;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,7 +27,8 @@ public class KafkaConsumerConfig {
 
     @Bean
     public ConsumerFactory<String, Map<String, Object>> consumerFactory() {
-        JsonDeserializer<Map<String, Object>> deserializer = new JsonDeserializer<>();
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        JsonDeserializer<Map<String, Object>> deserializer = new JsonDeserializer<>(new TypeReference<Map<String, Object>>() {}, mapper);
         deserializer.addTrustedPackages("*");
         deserializer.setUseTypeHeaders(false);
 

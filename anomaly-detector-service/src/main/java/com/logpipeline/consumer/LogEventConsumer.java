@@ -33,20 +33,19 @@ public class LogEventConsumer {
     }
 
     @RetryableTopic(
-            attempts = "3",
-            backoff = @Backoff(delay = 1000, multiplier = 2.0),
-            topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
-            dltTopicSuffix = "-dlt"
+        attempts = "3",
+        backoff = @Backoff(delay = 1000, multiplier = 2.0),
+        topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
+        dltTopicSuffix = "-dlt"
     )
     @KafkaListener(
-            topics = "${kafka.topics.processed-logs}",
-            groupId = "${spring.kafka.consumer.group-id}",
-            containerFactory = "kafkaListenerContainerFactory"
+        topics = "${kafka.topics.processed-logs}",
+        groupId = "${spring.kafka.consumer.group-id}"
+        // containerFactory line removed — @RetryableTopic manages this
     )
     public void consume(ConsumerRecord<String, Map<String, Object>> record) {
-        log.debug("Received log event [partition={}, offset={}, key={}]",
-                record.partition(), record.offset(), record.key());
-
+        log.info("Received log event [partition={}, offset={}, key={}]",
+            record.partition(), record.offset(), record.key());
         detectorService.process(record.value());
     }
 }

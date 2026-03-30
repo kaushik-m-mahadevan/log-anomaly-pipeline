@@ -1,5 +1,6 @@
 com\logpipeline\model\AnomalyEvent.class
 com\logpipeline\detector\AnomalyDetector.class
+com\logpipeline\config\KafkaConsumerConfig$1.class
 com\logpipeline\model\LogLevel.class
 com\logpipeline\model\AnomalySeverity.class
 com\logpipeline\config\KafkaConsumerConfig.class

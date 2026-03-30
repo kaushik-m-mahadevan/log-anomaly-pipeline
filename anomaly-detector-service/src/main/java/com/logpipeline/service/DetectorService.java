@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -62,6 +63,8 @@ public class DetectorService {
     public void process(Map<String, Object> rawPayload) {
         try {
             LogEvent event = toLogEvent(rawPayload);
+            log.info("Processing log event from service {}: level={}, message={}", 
+                    event.serviceId(), event.level(), event.message());
             AnomalyDetector detector = detectorFor(event.serviceId());
             Optional<AnomalyEvent> anomaly = detector.evaluate(event);
 
@@ -81,12 +84,22 @@ public class DetectorService {
     }
 
     private LogEvent toLogEvent(Map<String, Object> payload) {
+        Object tsObj = payload.get("timestamp");
+        Instant timestamp;
+        if (tsObj instanceof String s) {
+            timestamp = Instant.parse(s);
+        } else if (tsObj instanceof Number n) {
+            timestamp = Instant.ofEpochMilli(n.longValue());
+        } else {
+            timestamp = Instant.now();
+        }
+
         return new LogEvent(
                 (String) payload.get("eventId"),
                 (String) payload.get("serviceId"),
                 LogLevel.valueOf((String) payload.get("level")),
                 (String) payload.get("message"),
-                java.time.Instant.parse((String) payload.get("timestamp")),
+                timestamp,
                 (String) payload.getOrDefault("normalizedMessage", "")
         );
     }
