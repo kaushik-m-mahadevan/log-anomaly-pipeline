@@ -1,7 +1,0 @@
-D:\Downloads\log-anomaly-pipeline\log-anomaly-pipeline\alert-service\src\main\java\com\logpipeline\AlertServiceApplication.java
-D:\Downloads\log-anomaly-pipeline\log-anomaly-pipeline\alert-service\src\main\java\com\logpipeline\channel\AlertChannel.java
-D:\Downloads\log-anomaly-pipeline\log-anomaly-pipeline\alert-service\src\main\java\com\logpipeline\channel\ConsoleAlertChannel.java
-D:\Downloads\log-anomaly-pipeline\log-anomaly-pipeline\alert-service\src\main\java\com\logpipeline\config\KafkaConsumerConfig.java
-D:\Downloads\log-anomaly-pipeline\log-anomaly-pipeline\alert-service\src\main\java\com\logpipeline\consumer\AnomalyEventConsumer.java
-D:\Downloads\log-anomaly-pipeline\log-anomaly-pipeline\alert-service\src\main\java\com\logpipeline\model\AnomalyEvent.java
-D:\Downloads\log-anomaly-pipeline\log-anomaly-pipeline\alert-service\src\main\java\com\logpipeline\service\AlertRoutingService.java
