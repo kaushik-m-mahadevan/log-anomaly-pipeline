@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: alert-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: alert-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+
+kafka:
+  topics:
+    anomaly-alerts: anomaly-alerts
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+logging:
+  level:
+    com.logpipeline: INFO
+    org.apache.kafka: WARN
