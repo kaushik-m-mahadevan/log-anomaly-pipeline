@@ -1,0 +1,7 @@
+com\logpipeline\dto\LogEventRequest.class
+com\logpipeline\config\TopicConfig.class
+com\logpipeline\dto\LogEventMessage.class
+com\logpipeline\controller\LogIngestionController.class
+com\logpipeline\LogIngestionServiceApplication.class
+com\logpipeline\config\KafkaProducerConfig.class
+com\logpipeline\service\LogPublisherService.class

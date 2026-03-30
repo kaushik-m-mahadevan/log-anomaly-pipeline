@@ -1,0 +1,12 @@
+com\logpipeline\model\AnomalyEvent.class
+com\logpipeline\detector\AnomalyDetector.class
+com\logpipeline\model\LogLevel.class
+com\logpipeline\model\AnomalySeverity.class
+com\logpipeline\config\KafkaConsumerConfig.class
+com\logpipeline\config\KafkaProducerConfig.class
+com\logpipeline\consumer\LogEventConsumer.class
+com\logpipeline\config\TopicConfig.class
+com\logpipeline\detector\ErrorRateSpikeDetector.class
+com\logpipeline\LogAnomalyDetectorApplication.class
+com\logpipeline\model\LogEvent.class
+com\logpipeline\service\DetectorService.class
