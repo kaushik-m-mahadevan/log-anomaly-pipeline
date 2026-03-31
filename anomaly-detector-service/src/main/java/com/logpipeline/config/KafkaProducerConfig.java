@@ -28,10 +28,13 @@ public class KafkaProducerConfig {
         serializer.setAddTypeInfo(false);
 
         return new DefaultKafkaProducerFactory<>(Map.of(
-                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,    bootstrapServers,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
-                ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true,
-                ProducerConfig.ACKS_CONFIG, "all"
+                ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG,   true,
+                ProducerConfig.ACKS_CONFIG,                 "all",
+                // Item 7: prevent Kafka listener threads from hanging indefinitely on a slow broker
+                ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG,   10_000, // 10 s per attempt
+                ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG,  30_000  // 30 s total
         ), new StringSerializer(), serializer);
     }
 

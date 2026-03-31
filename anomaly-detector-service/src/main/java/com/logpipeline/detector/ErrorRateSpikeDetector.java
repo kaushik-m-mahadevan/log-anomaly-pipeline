@@ -101,6 +101,7 @@ public class ErrorRateSpikeDetector implements AnomalyDetector {
         AnomalySeverity severity = classifySeverity(errorRate);
 
         return new AnomalyEvent(
+                AnomalyEvent.CURRENT_VERSION,
                 UUID.randomUUID().toString(),
                 triggeringEvent.serviceId(),
                 severity,

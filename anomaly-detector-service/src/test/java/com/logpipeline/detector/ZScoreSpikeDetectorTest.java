@@ -571,6 +571,16 @@ class ZScoreSpikeDetectorTest {
         assertThat(detector.name()).isEqualTo("z-score-spike");
     }
 
+    @Test
+    @DisplayName("Anomaly event carries the current schema version")
+    void anomalyEvent_hasCurrentSchemaVersion() {
+        baseline(10, false);
+        Optional<AnomalyEvent> result = signal(5, true);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().schemaVersion()).isEqualTo(AnomalyEvent.CURRENT_VERSION);
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // Edge cases
     // ══════════════════════════════════════════════════════════════════════════

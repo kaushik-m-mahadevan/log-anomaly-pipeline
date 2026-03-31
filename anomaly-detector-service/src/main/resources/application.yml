@@ -10,25 +10,35 @@ spring:
     retry:
       topic:
         enabled: true
+  # Item 3: graceful shutdown — finish processing in-flight records before JVM exits
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: 8081
+  # Item 3: drain in-progress requests on SIGTERM
+  shutdown: graceful
 
 kafka:
   topics:
     processed-logs: processed-logs
     anomaly-alerts: anomaly-alerts
+  # Item 8: parameterised replication factor — set to 3 in staging/prod
+  replication-factor: ${KAFKA_REPLICATION_FACTOR:1}
+  consumer:
+    # Item 9: backpressure — cap events per poll to avoid max.poll.interval.ms breach
+    max-poll-records: ${KAFKA_MAX_POLL_RECORDS:100}
 
 detector:
   window-size: ${DETECTOR_WINDOW_SIZE:30}
   signal-window-size: ${DETECTOR_SIGNAL_WINDOW_SIZE:10}
   z-score-threshold: ${DETECTOR_Z_SCORE_THRESHOLD:2.0}
 
-server:
-  port: 8081
-
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always

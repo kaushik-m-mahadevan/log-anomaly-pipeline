@@ -1,6 +1,8 @@
 package com.logpipeline.service;
 
 import com.logpipeline.model.AnomalyEvent;
+import com.logpipeline.model.LogEventMessage;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,8 +13,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
 
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -20,18 +20,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for DetectorService — focuses on orchestration concerns:
- * payload parsing, Kafka publishing, per-service isolation, and error handling.
+ * payload parsing, Kafka publishing, per-service isolation, idempotency, and error handling.
  *
  * Detection logic is tested exhaustively in ZScoreSpikeDetectorTest.
  *
  * Configuration: windowSize=15, signalWindowSize=5, zScoreThreshold=2.0
  *   → baseline = 10 events, signal = 5 events
  *
- * Trigger recipe used throughout:
+ * Trigger recipe:
  *   10 × INFO  (baseline → 0% errors)
  *   5  × ERROR (signal  → 100% errors)
  *   Z = (1.0 − 0.0) / MIN_STD_DEV(0.01) = 100  →  well above threshold
@@ -46,11 +47,13 @@ class DetectorServiceTest {
 
     @Mock KafkaTemplate<String, AnomalyEvent> kafkaTemplate;
 
+    private SimpleMeterRegistry meterRegistry;
     DetectorService service;
 
     @BeforeEach
     void setUp() {
-        service = new DetectorService(kafkaTemplate, TOPIC, WINDOW, SIGNAL, Z_THRESH);
+        meterRegistry = new SimpleMeterRegistry();
+        service = new DetectorService(kafkaTemplate, TOPIC, WINDOW, SIGNAL, Z_THRESH, meterRegistry);
         lenient().when(kafkaTemplate.send(anyString(), anyString(), any(AnomalyEvent.class)))
                 .thenReturn(new CompletableFuture<>());
     }
@@ -68,7 +71,6 @@ class DetectorServiceTest {
     @Test
     @DisplayName("Window not yet full — no anomaly even if all errors")
     void process_windowNotFull_noAnomalyYet() {
-        // Send WINDOW-1 events — never reaches full window
         for (int i = 0; i < WINDOW - 1; i++) process("svc", "ERROR");
 
         verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
@@ -77,9 +79,6 @@ class DetectorServiceTest {
     @Test
     @DisplayName("Noisy service matching its baseline Z-score=0 — no publish")
     void process_noisyServiceMatchingBaseline_noPublish() {
-        // 6 ERROR + 4 INFO baseline → 60%
-        // 3 ERROR + 2 INFO signal  → 60%
-        // Z = (0.6 - 0.6) / stdDev = 0.0 → no fire
         processN("svc", "ERROR", 6);
         processN("svc", "INFO",  4);
         processN("svc", "ERROR", 3);
@@ -93,7 +92,6 @@ class DetectorServiceTest {
     @Test
     @DisplayName("Pristine baseline + full error signal publishes anomaly to correct topic and key")
     void process_pristineBaselineFullSpike_publishesAnomaly() {
-        // 10 INFO baseline + 5 ERROR signal → Z ≈ 100 → fires
         processN("svc", "INFO",  10);
         processN("svc", "ERROR", 5);
 
@@ -110,7 +108,7 @@ class DetectorServiceTest {
     }
 
     @Test
-    @DisplayName("Published AnomalyEvent carries correct serviceId, threshold, and non-null fields")
+    @DisplayName("Published AnomalyEvent carries correct serviceId, threshold, schemaVersion, and non-null fields")
     void process_anomalyEvent_hasCorrectFields() {
         processN("payment-service", "INFO",  10);
         processN("payment-service", "ERROR", 5);
@@ -126,6 +124,7 @@ class DetectorServiceTest {
         assertThat(anomaly.severity()).isNotNull();
         assertThat(anomaly.description()).isNotBlank();
         assertThat(anomaly.detectedAt()).isNotNull();
+        assertThat(anomaly.schemaVersion()).isEqualTo(AnomalyEvent.CURRENT_VERSION);
     }
 
     // ── Per-service detector isolation ────────────────────────────────────────
@@ -133,11 +132,9 @@ class DetectorServiceTest {
     @Test
     @DisplayName("Different serviceIds maintain independent detector state")
     void process_differentServices_independentDetectors() {
-        // svc-a: clean baseline + full spike → fires
         processN("svc-a", "INFO",  10);
         processN("svc-a", "ERROR", 5);
 
-        // svc-b: only INFO events → never fires
         processN("svc-b", "INFO", 15);
 
         verify(kafkaTemplate, times(1)).send(eq(TOPIC), eq("svc-a"), any());
@@ -157,30 +154,88 @@ class DetectorServiceTest {
         verify(kafkaTemplate, times(1)).send(eq(TOPIC), eq("svc-b"), any());
     }
 
+    // ── Idempotency (Item 4) ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Duplicate eventId is dropped — Kafka is not called twice for the same event")
+    void process_duplicateEventId_droppedSecondTime() {
+        String sharedId = UUID.randomUUID().toString();
+        LogEventMessage first  = message("svc", "INFO", sharedId);
+        LogEventMessage second = message("svc", "INFO", sharedId);
+
+        // Two calls with same eventId — only one should reach the detector
+        service.process(first);
+        service.process(second);
+
+        // Neither causes a publish (window not full), but we can verify the
+        // duplicate-drop counter was incremented
+        assertThat(meterRegistry.counter("detector.events.duplicates.dropped").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("Events with null eventId are not deduplicated and all pass through")
+    void process_nullEventId_notDeduped() {
+        // Two events with null eventId should both be processed (no dedup on null)
+        service.process(message("svc", "INFO", null));
+        service.process(message("svc", "INFO", null));
+
+        assertThat(meterRegistry.counter("detector.events.duplicates.dropped").count())
+                .isEqualTo(0.0);
+    }
+
+    @Test
+    @DisplayName("Distinct eventIds are each processed — no false deduplication")
+    void process_distinctEventIds_allProcessed() {
+        for (int i = 0; i < WINDOW; i++) {
+            service.process(message("svc", "INFO", UUID.randomUUID().toString()));
+        }
+
+        assertThat(meterRegistry.counter("detector.events.duplicates.dropped").count())
+                .isEqualTo(0.0);
+    }
+
+    // ── Metrics (Item 10) ─────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Detected anomaly increments the anomalies-detected counter")
+    void process_anomalyDetected_incrementsCounter() {
+        processN("svc", "INFO",  10);
+        processN("svc", "ERROR", 5);
+
+        assertThat(meterRegistry.counter("detector.anomalies.detected").count())
+                .isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("Registry size gauge reflects number of active service detectors")
+    void registrySize_reflectsActiveDetectors() {
+        processN("svc-a", "INFO", 1);
+        processN("svc-b", "INFO", 1);
+
+        assertThat(service.registrySize()).isGreaterThanOrEqualTo(2L);
+    }
+
     // ── Timestamp parsing ─────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("ISO-8601 timestamp string is parsed without error")
-    void process_timestampAsIsoString_parsedSuccessfully() {
-        Map<String, Object> p = payload("svc", "INFO");
-        p.put("timestamp", "2024-06-15T09:30:00Z");
-        service.process(p);
+    @DisplayName("Provided timestamp is passed through correctly")
+    void process_providedTimestamp_parsedSuccessfully() {
+        LogEventMessage msg = new LogEventMessage(
+                LogEventMessage.CURRENT_VERSION,
+                UUID.randomUUID().toString(), "svc", "INFO",
+                "test", Instant.parse("2024-06-15T09:30:00Z"), "test");
+        service.process(msg); // must not throw
     }
 
     @Test
-    @DisplayName("Epoch-millis timestamp (Number) is parsed without error")
-    void process_timestampAsEpochMillis_parsedSuccessfully() {
-        Map<String, Object> p = payload("svc", "INFO");
-        p.put("timestamp", System.currentTimeMillis());
-        service.process(p);
-    }
-
-    @Test
-    @DisplayName("Missing timestamp falls back to Instant.now() without error")
-    void process_missingTimestamp_fallsBackToNow() {
-        Map<String, Object> p = payload("svc", "INFO");
-        p.remove("timestamp");
-        service.process(p);
+    @DisplayName("Null timestamp is handled gracefully (falls back to Instant.now)")
+    void process_nullTimestamp_handledGracefully() {
+        LogEventMessage msg = new LogEventMessage(
+                LogEventMessage.CURRENT_VERSION,
+                UUID.randomUUID().toString(), "svc", "INFO",
+                "test", null, "test");
+        service.process(msg); // must not throw
     }
 
     // ── Validation / error handling ───────────────────────────────────────────
@@ -188,10 +243,12 @@ class DetectorServiceTest {
     @Test
     @DisplayName("Null level field throws IllegalArgumentException and is re-thrown")
     void process_nullLevel_throwsAndRethrows() {
-        Map<String, Object> p = payload("svc", "INFO");
-        p.put("level", null);
+        LogEventMessage msg = new LogEventMessage(
+                LogEventMessage.CURRENT_VERSION,
+                UUID.randomUUID().toString(), "svc", null,
+                "test", Instant.now(), "test");
 
-        assertThatThrownBy(() -> service.process(p))
+        assertThatThrownBy(() -> service.process(msg))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("level");
     }
@@ -199,34 +256,26 @@ class DetectorServiceTest {
     @Test
     @DisplayName("Unknown level string throws IllegalArgumentException with the bad value in message")
     void process_unknownLevel_throwsAndRethrows() {
-        Map<String, Object> p = payload("svc", "INFO");
-        p.put("level", "VERBOSE");
+        LogEventMessage msg = new LogEventMessage(
+                LogEventMessage.CURRENT_VERSION,
+                UUID.randomUUID().toString(), "svc", "VERBOSE",
+                "test", Instant.now(), "test");
 
-        assertThatThrownBy(() -> service.process(p))
+        assertThatThrownBy(() -> service.process(msg))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("VERBOSE");
     }
 
     @Test
-    @DisplayName("Missing level key throws and is re-thrown to DLT handler")
-    void process_missingLevelKey_throwsAndRethrows() {
-        Map<String, Object> p = new HashMap<>();
-        p.put("serviceId", "svc");
-
-        assertThatThrownBy(() -> service.process(p))
-                .isInstanceOf(Exception.class);
-    }
-
-    @Test
     @DisplayName("Exception in one call does not corrupt detector state for subsequent calls")
     void process_exceptionInOneCall_doesNotCorruptSubsequentCalls() {
-        Map<String, Object> bad = new HashMap<>();
-        bad.put("serviceId", "svc");
-        bad.put("level", null);
+        LogEventMessage bad = new LogEventMessage(
+                LogEventMessage.CURRENT_VERSION,
+                UUID.randomUUID().toString(), "svc", null,
+                "test", Instant.now(), "test");
 
         try { service.process(bad); } catch (Exception ignored) {}
 
-        // Subsequent valid calls proceed normally — full window of INFO, no anomaly
         for (int i = 0; i < WINDOW; i++) process("svc", "INFO");
 
         verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
@@ -235,21 +284,22 @@ class DetectorServiceTest {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void process(String serviceId, String level) {
-        service.process(payload(serviceId, level));
+        service.process(message(serviceId, level, UUID.randomUUID().toString()));
     }
 
     private void processN(String serviceId, String level, int n) {
         for (int i = 0; i < n; i++) process(serviceId, level);
     }
 
-    private Map<String, Object> payload(String serviceId, String level) {
-        Map<String, Object> m = new HashMap<>();
-        m.put("eventId",           UUID.randomUUID().toString());
-        m.put("serviceId",         serviceId);
-        m.put("level",             level);
-        m.put("message",           "test message");
-        m.put("timestamp",         Instant.now().toString());
-        m.put("normalizedMessage", "test message");
-        return m;
+    private LogEventMessage message(String serviceId, String level, String eventId) {
+        return new LogEventMessage(
+                LogEventMessage.CURRENT_VERSION,
+                eventId,
+                serviceId,
+                level,
+                "test message",
+                Instant.now(),
+                "test message"
+        );
     }
 }

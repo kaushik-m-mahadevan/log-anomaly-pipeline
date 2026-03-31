@@ -13,15 +13,20 @@ public class TopicConfig {
     private String processedLogsTopic;
 
     /**
-     * Declares the topic if it does not already exist.
+     * Replication factor is parameterised (Item 8) so staging/prod clusters use 3
+     * without requiring a code change. Local dev keeps 1 via the default.
+     *
      * Partition count of 3 allows up to 3 parallel detector consumer instances
-     * without rebalancing overhead; replication factor of 1 is appropriate for local dev.
+     * without rebalancing overhead.
      */
+    @Value("${kafka.replication-factor:1}")
+    private int replicationFactor;
+
     @Bean
     public NewTopic processedLogsTopic() {
         return TopicBuilder.name(processedLogsTopic)
                 .partitions(3)
-                .replicas(1)
+                .replicas(replicationFactor)
                 .build();
     }
 }

@@ -2,6 +2,7 @@ package com.logpipeline.controller;
 
 import com.logpipeline.dto.LogEventBatchRequest;
 import com.logpipeline.dto.LogEventRequest;
+import com.logpipeline.ratelimit.IngressRateLimiter;
 import com.logpipeline.service.LogPublisherService;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -10,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -32,14 +34,22 @@ public class LogIngestionController {
     private static final int MAX_BATCH_SIZE = 500;
 
     private final LogPublisherService publisherService;
+    private final IngressRateLimiter rateLimiter;
 
-    public LogIngestionController(LogPublisherService publisherService) {
+    public LogIngestionController(LogPublisherService publisherService, IngressRateLimiter rateLimiter) {
         this.publisherService = publisherService;
+        this.rateLimiter = rateLimiter;
     }
 
     @PostMapping("/batch")
     public ResponseEntity<Map<String, Object>> ingestBatch(
             @RequestBody @Valid LogEventBatchRequest batch) {
+
+        // Item 12: global rate limit — 429 before touching Kafka
+        if (!rateLimiter.tryAcquire()) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+                    "Rate limit exceeded. Retry after 1 second.");
+        }
 
         List<LogEventRequest> requests = batch.events();
 

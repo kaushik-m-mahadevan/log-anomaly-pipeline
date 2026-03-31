@@ -2,7 +2,7 @@ package com.logpipeline.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.logpipeline.dto.LogEventMessage;
+import com.logpipeline.model.LogEventMessage;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,12 +28,15 @@ public class KafkaProducerConfig {
         serializer.setAddTypeInfo(false); // keep messages schema-agnostic
 
         return new DefaultKafkaProducerFactory<>(Map.of(
-                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,    bootstrapServers,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
-                ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true,       // exactly-once producer semantics
-                ProducerConfig.ACKS_CONFIG, "all",                    // wait for all ISR replicas
-                ProducerConfig.RETRIES_CONFIG, 3,
-                ProducerConfig.LINGER_MS_CONFIG, 5                    // micro-batching for throughput
+                ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG,   true,   // exactly-once producer semantics
+                ProducerConfig.ACKS_CONFIG,                 "all",  // wait for all ISR replicas
+                ProducerConfig.RETRIES_CONFIG,              3,
+                ProducerConfig.LINGER_MS_CONFIG,            5,       // micro-batching for throughput
+                // Item 7: prevent Tomcat threads from hanging indefinitely on a slow broker
+                ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG,   10_000, // 10 s per request attempt
+                ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG,  30_000  // 30 s total (must be ≥ request × retries)
         ), new org.apache.kafka.common.serialization.StringSerializer(), serializer);
     }
 

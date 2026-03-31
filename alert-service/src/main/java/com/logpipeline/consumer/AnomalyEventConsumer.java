@@ -6,11 +6,17 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 
 /**
  * Kafka listener for anomaly alerts.
  * Delegates immediately to AlertRoutingService — no business logic here.
+ *
+ * Item 5: Manual acknowledgment — the offset is committed only after route() returns
+ * successfully. If the alert channel throws, the offset is NOT committed and the
+ * event will be redelivered on the next poll (no silent drops).
  */
 @Component
 public class AnomalyEventConsumer {
@@ -28,10 +34,20 @@ public class AnomalyEventConsumer {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "alertKafkaListenerContainerFactory"
     )
-    public void consume(ConsumerRecord<String, AnomalyEvent> record) {
+    public void consume(@Payload(required = false) AnomalyEvent event, Acknowledgment ack, ConsumerRecord<String, AnomalyEvent> record) {
         log.debug("Received anomaly event [partition={}, offset={}, serviceId={}]",
                 record.partition(), record.offset(), record.key());
 
-        routingService.route(record.value());
+        if (event == null) {
+            log.warn("Received null anomaly event, skipping [partition={}, offset={}]",
+                    record.partition(), record.offset());
+            ack.acknowledge();
+            return;
+        }
+
+        routingService.route(event);
+
+        // Item 5: acknowledge only after successful routing
+        ack.acknowledge();
     }
 }

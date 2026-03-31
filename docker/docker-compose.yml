@@ -33,6 +33,8 @@ services:
       - "8080:8080"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_REPLICATION_FACTOR: 1        # increase to 3 on a multi-broker cluster
+      RATE_LIMIT_RPS: 1000
     depends_on:
       - kafka
 
@@ -44,6 +46,8 @@ services:
       - "8081:8081"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_REPLICATION_FACTOR: 1        # increase to 3 on a multi-broker cluster
+      KAFKA_MAX_POLL_RECORDS: 100
       DETECTOR_WINDOW_SIZE: 30
       DETECTOR_SIGNAL_WINDOW_SIZE: 10
       DETECTOR_Z_SCORE_THRESHOLD: 2.0

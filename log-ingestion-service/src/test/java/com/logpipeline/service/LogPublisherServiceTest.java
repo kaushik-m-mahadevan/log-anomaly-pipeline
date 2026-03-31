@@ -1,7 +1,8 @@
 package com.logpipeline.service;
 
-import com.logpipeline.dto.LogEventMessage;
 import com.logpipeline.dto.LogEventRequest;
+import com.logpipeline.model.LogEventMessage;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,8 +19,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -29,11 +32,13 @@ class LogPublisherServiceTest {
 
     @Mock(lenient = true) KafkaTemplate<String, LogEventMessage> kafkaTemplate;
 
+    private SimpleMeterRegistry meterRegistry;
     LogPublisherService service;
 
     @BeforeEach
     void setUp() {
-        service = new LogPublisherService(kafkaTemplate, TOPIC);
+        meterRegistry = new SimpleMeterRegistry();
+        service = new LogPublisherService(kafkaTemplate, TOPIC, meterRegistry);
         when(kafkaTemplate.send(anyString(), anyString(), any(LogEventMessage.class)))
                 .thenReturn(CompletableFuture.completedFuture(null));
     }
@@ -79,7 +84,6 @@ class LogPublisherServiceTest {
 
         LogEventMessage sent = msgCaptor.getValue();
         assertThat(sent.normalizedMessage()).isEqualTo("hello world");
-        // original message preserved
         assertThat(sent.message()).isEqualTo("  Hello World  ");
     }
 
@@ -138,5 +142,14 @@ class LogPublisherServiceTest {
         ArgumentCaptor<LogEventMessage> captor = ArgumentCaptor.forClass(LogEventMessage.class);
         verify(kafkaTemplate).send(anyString(), anyString(), captor.capture());
         assertThat(captor.getValue().level()).isEqualTo("FATAL");
+    }
+
+    @Test
+    void publishBatch_setsSchemaVersion_onEachMessage() {
+        service.publishBatch(List.of(new LogEventRequest("svc", "INFO", "msg", null)));
+
+        ArgumentCaptor<LogEventMessage> captor = ArgumentCaptor.forClass(LogEventMessage.class);
+        verify(kafkaTemplate).send(anyString(), anyString(), captor.capture());
+        assertThat(captor.getValue().schemaVersion()).isEqualTo(LogEventMessage.CURRENT_VERSION);
     }
 }

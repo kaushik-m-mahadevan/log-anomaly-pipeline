@@ -1,8 +1,8 @@
 package com.logpipeline.config;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.logpipeline.model.LogEventMessage;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,27 +25,37 @@ public class KafkaConsumerConfig {
     @Value("${spring.kafka.consumer.group-id}")
     private String groupId;
 
+    /** Item 9: backpressure — limit events per poll to stay within max.poll.interval.ms. */
+    @Value("${kafka.consumer.max-poll-records:100}")
+    private int maxPollRecords;
+
+    /**
+     * Item 2: Deserialize directly to LogEventMessage (shared via common module) instead
+     * of Map<String,Object>. Compile-time contract catches field renames immediately.
+     */
     @Bean
-    public ConsumerFactory<String, Map<String, Object>> consumerFactory() {
+    public ConsumerFactory<String, LogEventMessage> consumerFactory() {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        JsonDeserializer<Map<String, Object>> deserializer = new JsonDeserializer<>(new TypeReference<Map<String, Object>>() {}, mapper);
-        deserializer.addTrustedPackages("java.util", "java.lang");
+        JsonDeserializer<LogEventMessage> deserializer =
+                new JsonDeserializer<>(LogEventMessage.class, mapper);
+        deserializer.addTrustedPackages("com.logpipeline.model");
         deserializer.setUseTypeHeaders(false);
 
         return new DefaultKafkaConsumerFactory<>(Map.of(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
-                ConsumerConfig.GROUP_ID_CONFIG, groupId,
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,      bootstrapServers,
+                ConsumerConfig.GROUP_ID_CONFIG,               groupId,
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false   // manual commit via AckMode
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,      "earliest",
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,     false,        // manual commit via AckMode
+                ConsumerConfig.MAX_POLL_RECORDS_CONFIG,       maxPollRecords
         ), new StringDeserializer(), deserializer);
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, Map<String, Object>>
-            kafkaListenerContainerFactory(ConsumerFactory<String, Map<String, Object>> consumerFactory) {
+    public ConcurrentKafkaListenerContainerFactory<String, LogEventMessage>
+            kafkaListenerContainerFactory(ConsumerFactory<String, LogEventMessage> consumerFactory) {
 
-        ConcurrentKafkaListenerContainerFactory<String, Map<String, Object>> factory =
+        ConcurrentKafkaListenerContainerFactory<String, LogEventMessage> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setConcurrency(3);   // one thread per partition

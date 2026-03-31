@@ -1,7 +1,9 @@
 package com.logpipeline.service;
 
-import com.logpipeline.dto.LogEventMessage;
 import com.logpipeline.dto.LogEventRequest;
+import com.logpipeline.model.LogEventMessage;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,12 +29,22 @@ public class LogPublisherService {
 
     private final KafkaTemplate<String, LogEventMessage> kafkaTemplate;
     private final String processedLogsTopic;
+    private final Counter eventsPublishedCounter;
+    private final Counter eventsFailedCounter;
 
     public LogPublisherService(
             KafkaTemplate<String, LogEventMessage> kafkaTemplate,
-            @Value("${kafka.topics.processed-logs}") String processedLogsTopic) {
-        this.kafkaTemplate = kafkaTemplate;
+            @Value("${kafka.topics.processed-logs}") String processedLogsTopic,
+            MeterRegistry meterRegistry) {
+        this.kafkaTemplate      = kafkaTemplate;
         this.processedLogsTopic = processedLogsTopic;
+        // Item 10: custom business metrics — track publish success/failure rates
+        this.eventsPublishedCounter = Counter.builder("log.events.published")
+                .description("Total log events successfully published to Kafka")
+                .register(meterRegistry);
+        this.eventsFailedCounter = Counter.builder("log.events.publish.failed")
+                .description("Total log events that failed to publish to Kafka")
+                .register(meterRegistry);
     }
 
     /**
@@ -56,6 +68,7 @@ public class LogPublisherService {
 
     private LogEventMessage toMessage(LogEventRequest request) {
         return new LogEventMessage(
+                LogEventMessage.CURRENT_VERSION,
                 UUID.randomUUID().toString(),
                 request.serviceId(),
                 request.level(),
@@ -70,14 +83,23 @@ public class LogPublisherService {
     }
 
     private CompletableFuture<SendResult<String, LogEventMessage>> publish(LogEventMessage message) {
+        // Item 14: guard against null/blank serviceId reaching the partition key slot
+        if (message.serviceId() == null || message.serviceId().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Cannot publish log event with null or blank serviceId [eventId=" + message.eventId() + "]");
+        }
+
         CompletableFuture<SendResult<String, LogEventMessage>> future =
                 kafkaTemplate.send(processedLogsTopic, message.serviceId(), message);
 
         future.whenComplete((result, ex) -> {
             if (ex != null) {
+                // Item 11: meter every failed publish so ops can alert on the metric
+                eventsFailedCounter.increment();
                 log.error("Failed to publish log event [eventId={}, serviceId={}]: {}",
                         message.eventId(), message.serviceId(), ex.getMessage());
             } else {
+                eventsPublishedCounter.increment();
                 log.info("Successfully published log event [eventId={}, serviceId={}, partition={}, offset={}]",
                         message.eventId(), message.serviceId(),
                         result.getRecordMetadata().partition(),

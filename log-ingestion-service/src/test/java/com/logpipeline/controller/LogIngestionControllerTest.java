@@ -3,7 +3,9 @@ package com.logpipeline.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.logpipeline.dto.LogEventBatchRequest;
 import com.logpipeline.dto.LogEventRequest;
+import com.logpipeline.ratelimit.IngressRateLimiter;
 import com.logpipeline.service.LogPublisherService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -17,6 +19,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -26,6 +29,13 @@ class LogIngestionControllerTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
     @MockBean  LogPublisherService publisherService;
+    @MockBean  IngressRateLimiter rateLimiter;
+
+    @BeforeEach
+    void allowByDefault() {
+        // Default: rate limiter passes all requests through — existing tests unaffected
+        when(rateLimiter.tryAcquire()).thenReturn(true);
+    }
 
     // ── /batch endpoint ──────────────────────────────────────────────────────
 
@@ -115,7 +125,6 @@ class LogIngestionControllerTest {
 
     @Test
     void ingestBatch_multipleViolationsInOneEvent_allErrorsReported() throws Exception {
-        // both serviceId and message are blank
         String body = "{\"events\":[{\"serviceId\":\"\",\"level\":\"INFO\",\"message\":\"\"}]}";
 
         mvc.perform(post("/api/v1/logs/batch").contentType(MediaType.APPLICATION_JSON).content(body))
@@ -125,7 +134,6 @@ class LogIngestionControllerTest {
 
     @Test
     void ingestBatch_oversizedBatch_returns500() throws Exception {
-        // 501 events exceeds MAX_BATCH_SIZE — caught by generic handler → 500
         List<LogEventRequest> events = new ArrayList<>();
         for (int i = 0; i < 501; i++) {
             events.add(new LogEventRequest("svc", "INFO", "msg-" + i, null));
@@ -150,6 +158,26 @@ class LogIngestionControllerTest {
     void ingestBatch_missingRequestBody_returns400() throws Exception {
         mvc.perform(post("/api/v1/logs/batch").contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isBadRequest());
+    }
+
+    // ── Rate limiting (Item 12) ───────────────────────────────────────────────
+
+    @Test
+    void ingestBatch_rateLimitExceeded_returns429() throws Exception {
+        when(rateLimiter.tryAcquire()).thenReturn(false);
+        String body = batch(validEvent("svc", "INFO", "msg"));
+
+        mvc.perform(post("/api/v1/logs/batch").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void ingestSingle_rateLimitExceeded_returns429() throws Exception {
+        when(rateLimiter.tryAcquire()).thenReturn(false);
+        String body = mapper.writeValueAsString(new LogEventRequest("svc", "INFO", "msg", null));
+
+        mvc.perform(post("/api/v1/logs").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isTooManyRequests());
     }
 
     // ── /logs (single) endpoint ───────────────────────────────────────────────

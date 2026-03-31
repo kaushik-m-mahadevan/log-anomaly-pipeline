@@ -7,19 +7,27 @@ spring:
       group-id: alert-group
       auto-offset-reset: earliest
       enable-auto-commit: false
+  # Item 3: graceful shutdown — finish processing in-flight alerts before JVM exits
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: 8082
+  # Item 3: drain in-progress requests on SIGTERM
+  shutdown: graceful
 
 kafka:
   topics:
     anomaly-alerts: anomaly-alerts
 
-server:
-  port: 8082
-
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
 
 logging:
   level:

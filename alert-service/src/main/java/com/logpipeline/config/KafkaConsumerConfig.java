@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 
 import java.util.Map;
@@ -33,10 +34,11 @@ public class KafkaConsumerConfig {
         deserializer.setUseTypeHeaders(false);
 
         return new DefaultKafkaConsumerFactory<>(Map.of(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
-                ConsumerConfig.GROUP_ID_CONFIG, groupId,
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, true  // auto-commit, no manual ack needed
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,      bootstrapServers,
+                ConsumerConfig.GROUP_ID_CONFIG,               groupId,
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,      "earliest",
+                // Item 5: disable auto-commit so an alert channel failure doesn't silently drop messages
+                ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,     false
         ), new StringDeserializer(), deserializer);
     }
 
@@ -48,7 +50,11 @@ public class KafkaConsumerConfig {
         ConcurrentKafkaListenerContainerFactory<String, AnomalyEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
-        // no AckMode — auto-commit handles offsets cleanly
+        // Item 5: MANUAL_IMMEDIATE — offset committed only when the listener calls ack.acknowledge().
+        // AckMode.RECORD is an automatic mode and does not inject the Acknowledgment parameter.
+        // MANUAL_IMMEDIATE commits the offset instantly on ack.acknowledge(), which is what we want:
+        // each record is committed right after route() succeeds, not batched with others.
+        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
         return factory;
     }
 }

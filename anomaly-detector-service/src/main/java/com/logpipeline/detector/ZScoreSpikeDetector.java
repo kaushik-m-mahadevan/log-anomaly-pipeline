@@ -158,6 +158,7 @@ public class ZScoreSpikeDetector implements AnomalyDetector {
             LogEvent triggeringEvent, double zScore, double baselineRate, double signalRate) {
 
         return new AnomalyEvent(
+                AnomalyEvent.CURRENT_VERSION,
                 UUID.randomUUID().toString(),
                 triggeringEvent.serviceId(),
                 classifySeverity(zScore),

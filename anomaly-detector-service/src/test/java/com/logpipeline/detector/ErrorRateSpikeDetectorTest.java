@@ -336,6 +336,16 @@ class ErrorRateSpikeDetectorTest {
     }
 
     @Test
+    @DisplayName("Anomaly event carries the current schema version")
+    void anomalyEvent_hasCurrentSchemaVersion() {
+        for (int i = 0; i < 4; i++) detector.evaluate(errorEvent());
+        Optional<AnomalyEvent> result = detector.evaluate(errorEvent());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().schemaVersion()).isEqualTo(AnomalyEvent.CURRENT_VERSION);
+    }
+
+    @Test
     @DisplayName("Anomaly event carries the serviceId of the triggering event")
     void anomalyEvent_hasCorrectServiceId() {
         ErrorRateSpikeDetector d = new ErrorRateSpikeDetector(WINDOW_SIZE, THRESHOLD);

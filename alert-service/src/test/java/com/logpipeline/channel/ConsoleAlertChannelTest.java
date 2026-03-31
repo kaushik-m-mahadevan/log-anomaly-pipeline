@@ -34,6 +34,7 @@ class ConsoleAlertChannelTest {
     @Test
     void send_doesNotThrow_whenDescriptionIsLong() {
         AnomalyEvent event = new AnomalyEvent(
+                AnomalyEvent.CURRENT_VERSION,
                 UUID.randomUUID().toString(),
                 "svc",
                 AnomalySeverity.HIGH,
@@ -49,6 +50,7 @@ class ConsoleAlertChannelTest {
 
     private AnomalyEvent anomaly(AnomalySeverity severity) {
         return new AnomalyEvent(
+                AnomalyEvent.CURRENT_VERSION,
                 UUID.randomUUID().toString(),
                 "test-service",
                 severity,

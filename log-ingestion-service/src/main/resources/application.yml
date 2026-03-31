@@ -6,19 +6,30 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+  # Item 3: graceful shutdown — drains in-flight requests before JVM exits
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+server:
+  port: 8080
+  # Item 3: allow Tomcat to finish serving requests already in flight on SIGTERM
+  shutdown: graceful
 
 kafka:
   topics:
     processed-logs: processed-logs
+  # Item 8: parameterised replication factor — set to 3 in staging/prod env vars
+  replication-factor: ${KAFKA_REPLICATION_FACTOR:1}
 
-server:
-  port: 8080
+# Item 12: configurable rate limit; override per environment
+rate-limit:
+  requests-per-second: ${RATE_LIMIT_RPS:1000}
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always

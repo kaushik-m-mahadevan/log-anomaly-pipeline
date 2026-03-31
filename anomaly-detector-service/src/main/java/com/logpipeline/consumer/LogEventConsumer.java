@@ -1,5 +1,6 @@
 package com.logpipeline.consumer;
 
+import com.logpipeline.model.LogEventMessage;
 import com.logpipeline.service.DetectorService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
@@ -10,13 +11,15 @@ import org.springframework.kafka.retrytopic.TopicSuffixingStrategy;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
-
 /**
  * Kafka listener for the processed-logs topic.
  *
  * Separation of concerns: this class handles only Kafka I/O and error handling.
  * All business logic lives in DetectorService — the listener is infrastructure.
+ *
+ * Item 2: The consumer record type is now LogEventMessage (shared via common module)
+ * instead of Map<String,Object>. If the ingestion service renames a field, this
+ * class will fail at deserialization time rather than silently routing null values.
  *
  * @RetryableTopic configures non-blocking retries with exponential backoff,
  * routing exhausted messages to a dead-letter topic automatically.
@@ -41,11 +44,18 @@ public class LogEventConsumer {
     @KafkaListener(
         topics = "${kafka.topics.processed-logs}",
         groupId = "${spring.kafka.consumer.group-id}"
-        // containerFactory line removed — @RetryableTopic manages this
     )
-    public void consume(ConsumerRecord<String, Map<String, Object>> record) {
+    public void consume(ConsumerRecord<String, LogEventMessage> record) {
         log.info("Received log event [partition={}, offset={}, key={}]",
             record.partition(), record.offset(), record.key());
-        detectorService.process(record.value());
+        
+        LogEventMessage message = record.value();
+        if (message == null) {
+            log.warn("Received null log event message, skipping [partition={}, offset={}]",
+                    record.partition(), record.offset());
+            return;
+        }
+        
+        detectorService.process(message);
     }
 }
