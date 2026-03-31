@@ -1,7 +1,7 @@
 package com.logpipeline.service;
 
 import com.logpipeline.detector.AnomalyDetector;
-import com.logpipeline.detector.ErrorRateSpikeDetector;
+import com.logpipeline.detector.ZScoreSpikeDetector;
 import com.logpipeline.model.AnomalyEvent;
 import com.logpipeline.model.LogEvent;
 import com.logpipeline.model.LogLevel;
@@ -36,7 +36,8 @@ public class DetectorService {
     private final KafkaTemplate<String, AnomalyEvent> kafkaTemplate;
     private final String anomalyAlertsTopic;
     private final int windowSize;
-    private final double errorRateThreshold;
+    private final int signalWindowSize;
+    private final double zScoreThreshold;
 
     /**
      * One detector per serviceId — created lazily on first event for that service.
@@ -48,12 +49,14 @@ public class DetectorService {
     public DetectorService(
             KafkaTemplate<String, AnomalyEvent> kafkaTemplate,
             @Value("${kafka.topics.anomaly-alerts}") String anomalyAlertsTopic,
-            @Value("${detector.window-size:20}") int windowSize,
-            @Value("${detector.error-rate-threshold:0.4}") double errorRateThreshold) {
-        this.kafkaTemplate = kafkaTemplate;
+            @Value("${detector.window-size:30}") int windowSize,
+            @Value("${detector.signal-window-size:10}") int signalWindowSize,
+            @Value("${detector.z-score-threshold:2.0}") double zScoreThreshold) {
+        this.kafkaTemplate    = kafkaTemplate;
         this.anomalyAlertsTopic = anomalyAlertsTopic;
-        this.windowSize = windowSize;
-        this.errorRateThreshold = errorRateThreshold;
+        this.windowSize       = windowSize;
+        this.signalWindowSize = signalWindowSize;
+        this.zScoreThreshold  = zScoreThreshold;
     }
 
     /**
@@ -117,7 +120,7 @@ public class DetectorService {
 
     private AnomalyDetector detectorFor(String serviceId) {
         return detectorRegistry.computeIfAbsent(serviceId,
-                id -> new ErrorRateSpikeDetector(windowSize, errorRateThreshold));
+                id -> new ZScoreSpikeDetector(windowSize, signalWindowSize, zScoreThreshold));
     }
 
     private void publishAnomaly(AnomalyEvent anomaly) {

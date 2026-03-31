@@ -17,8 +17,9 @@ kafka:
     anomaly-alerts: anomaly-alerts
 
 detector:
-  window-size: ${DETECTOR_WINDOW_SIZE:5}
-  error-rate-threshold: ${DETECTOR_ERROR_RATE_THRESHOLD:0.4}
+  window-size: ${DETECTOR_WINDOW_SIZE:30}
+  signal-window-size: ${DETECTOR_SIGNAL_WINDOW_SIZE:10}
+  z-score-threshold: ${DETECTOR_Z_SCORE_THRESHOLD:2.0}
 
 server:
   port: 8081

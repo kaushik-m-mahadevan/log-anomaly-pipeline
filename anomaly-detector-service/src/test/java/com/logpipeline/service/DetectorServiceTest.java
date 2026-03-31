@@ -22,12 +22,27 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
+/**
+ * Unit tests for DetectorService — focuses on orchestration concerns:
+ * payload parsing, Kafka publishing, per-service isolation, and error handling.
+ *
+ * Detection logic is tested exhaustively in ZScoreSpikeDetectorTest.
+ *
+ * Configuration: windowSize=15, signalWindowSize=5, zScoreThreshold=2.0
+ *   → baseline = 10 events, signal = 5 events
+ *
+ * Trigger recipe used throughout:
+ *   10 × INFO  (baseline → 0% errors)
+ *   5  × ERROR (signal  → 100% errors)
+ *   Z = (1.0 − 0.0) / MIN_STD_DEV(0.01) = 100  →  well above threshold
+ */
 @ExtendWith(MockitoExtension.class)
 class DetectorServiceTest {
 
     private static final String TOPIC    = "anomaly-alerts";
-    private static final int    WINDOW   = 3;
-    private static final double THRESHOLD = 0.5; // 50% — 2/3 errors triggers
+    private static final int    WINDOW   = 15;
+    private static final int    SIGNAL   = 5;
+    private static final double Z_THRESH = 2.0;
 
     @Mock KafkaTemplate<String, AnomalyEvent> kafkaTemplate;
 
@@ -35,7 +50,7 @@ class DetectorServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DetectorService(kafkaTemplate, TOPIC, WINDOW, THRESHOLD);
+        service = new DetectorService(kafkaTemplate, TOPIC, WINDOW, SIGNAL, Z_THRESH);
         lenient().when(kafkaTemplate.send(anyString(), anyString(), any(AnomalyEvent.class)))
                 .thenReturn(new CompletableFuture<>());
     }
@@ -43,21 +58,9 @@ class DetectorServiceTest {
     // ── No-anomaly paths ──────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("INFO events below threshold produce no Kafka publish")
-    void process_infoEvents_neverPublish() {
-        process("svc", "INFO");
-        process("svc", "INFO");
-        process("svc", "INFO");
-
-        verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
-    }
-
-    @Test
-    @DisplayName("Single error in window of 3 stays below 50% threshold")
-    void process_singleError_belowThreshold_noPublish() {
-        process("svc", "ERROR");
-        process("svc", "INFO");
-        process("svc", "INFO");
+    @DisplayName("Full window of INFO events produces no Kafka publish")
+    void process_allInfoEvents_neverPublish() {
+        for (int i = 0; i < WINDOW; i++) process("svc", "INFO");
 
         verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
     }
@@ -65,9 +68,22 @@ class DetectorServiceTest {
     @Test
     @DisplayName("Window not yet full — no anomaly even if all errors")
     void process_windowNotFull_noAnomalyYet() {
-        // window = 3, only 2 events sent
-        process("svc", "ERROR");
-        process("svc", "ERROR");
+        // Send WINDOW-1 events — never reaches full window
+        for (int i = 0; i < WINDOW - 1; i++) process("svc", "ERROR");
+
+        verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Noisy service matching its baseline Z-score=0 — no publish")
+    void process_noisyServiceMatchingBaseline_noPublish() {
+        // 6 ERROR + 4 INFO baseline → 60%
+        // 3 ERROR + 2 INFO signal  → 60%
+        // Z = (0.6 - 0.6) / stdDev = 0.0 → no fire
+        processN("svc", "ERROR", 6);
+        processN("svc", "INFO",  4);
+        processN("svc", "ERROR", 3);
+        processN("svc", "INFO",  2);
 
         verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
     }
@@ -75,60 +91,70 @@ class DetectorServiceTest {
     // ── Anomaly detected paths ────────────────────────────────────────────────
 
     @Test
-    @DisplayName("2 errors in window of 3 (66%) exceeds 50% threshold — publishes anomaly")
-    void process_errorsAboveThreshold_publishesAnomaly() {
-        process("svc", "ERROR");
-        process("svc", "ERROR");
-        process("svc", "INFO"); // 2/3 = 66% ≥ 50%
+    @DisplayName("Pristine baseline + full error signal publishes anomaly to correct topic and key")
+    void process_pristineBaselineFullSpike_publishesAnomaly() {
+        // 10 INFO baseline + 5 ERROR signal → Z ≈ 100 → fires
+        processN("svc", "INFO",  10);
+        processN("svc", "ERROR", 5);
 
         verify(kafkaTemplate, times(1)).send(eq(TOPIC), eq("svc"), any(AnomalyEvent.class));
     }
 
     @Test
-    @DisplayName("All FATAL events in full window triggers anomaly")
-    void process_allFatal_triggersAnomaly() {
-        process("svc", "FATAL");
-        process("svc", "FATAL");
-        process("svc", "FATAL");
+    @DisplayName("FATAL events in signal zone trigger anomaly")
+    void process_fatalInSignal_triggersAnomaly() {
+        processN("svc", "INFO",  10);
+        processN("svc", "FATAL", 5);
 
         verify(kafkaTemplate, times(1)).send(eq(TOPIC), eq("svc"), any(AnomalyEvent.class));
     }
 
     @Test
-    @DisplayName("Published anomaly carries correct serviceId and rate fields")
+    @DisplayName("Published AnomalyEvent carries correct serviceId, threshold, and non-null fields")
     void process_anomalyEvent_hasCorrectFields() {
-        process("payment-service", "ERROR");
-        process("payment-service", "ERROR");
-        process("payment-service", "INFO");
+        processN("payment-service", "INFO",  10);
+        processN("payment-service", "ERROR", 5);
 
         ArgumentCaptor<AnomalyEvent> captor = ArgumentCaptor.forClass(AnomalyEvent.class);
         verify(kafkaTemplate).send(anyString(), anyString(), captor.capture());
 
         AnomalyEvent anomaly = captor.getValue();
         assertThat(anomaly.serviceId()).isEqualTo("payment-service");
-        assertThat(anomaly.detectedValue()).isGreaterThanOrEqualTo(THRESHOLD);
-        assertThat(anomaly.threshold()).isEqualTo(THRESHOLD);
+        assertThat(anomaly.detectedValue()).isGreaterThanOrEqualTo(Z_THRESH);
+        assertThat(anomaly.threshold()).isEqualTo(Z_THRESH);
         assertThat(anomaly.anomalyId()).isNotBlank();
+        assertThat(anomaly.severity()).isNotNull();
+        assertThat(anomaly.description()).isNotBlank();
         assertThat(anomaly.detectedAt()).isNotNull();
     }
 
     // ── Per-service detector isolation ────────────────────────────────────────
 
     @Test
-    @DisplayName("Different serviceIds maintain independent sliding windows")
+    @DisplayName("Different serviceIds maintain independent detector state")
     void process_differentServices_independentDetectors() {
-        // svc-a gets 2 errors → anomaly
-        process("svc-a", "ERROR");
-        process("svc-a", "ERROR");
-        process("svc-a", "INFO"); // 2/3 = 66%
+        // svc-a: clean baseline + full spike → fires
+        processN("svc-a", "INFO",  10);
+        processN("svc-a", "ERROR", 5);
 
-        // svc-b only gets 1 error → no anomaly
-        process("svc-b", "ERROR");
-        process("svc-b", "INFO");
-        process("svc-b", "INFO"); // 1/3 = 33%
+        // svc-b: only INFO events → never fires
+        processN("svc-b", "INFO", 15);
 
         verify(kafkaTemplate, times(1)).send(eq(TOPIC), eq("svc-a"), any());
         verify(kafkaTemplate, never()).send(eq(TOPIC), eq("svc-b"), any());
+    }
+
+    @Test
+    @DisplayName("Two spiking services each publish exactly one anomaly independently")
+    void process_twoSpikingServices_eachPublishOnce() {
+        processN("svc-a", "INFO",  10);
+        processN("svc-a", "ERROR", 5);
+
+        processN("svc-b", "INFO",  10);
+        processN("svc-b", "ERROR", 5);
+
+        verify(kafkaTemplate, times(1)).send(eq(TOPIC), eq("svc-a"), any());
+        verify(kafkaTemplate, times(1)).send(eq(TOPIC), eq("svc-b"), any());
     }
 
     // ── Timestamp parsing ─────────────────────────────────────────────────────
@@ -136,28 +162,25 @@ class DetectorServiceTest {
     @Test
     @DisplayName("ISO-8601 timestamp string is parsed without error")
     void process_timestampAsIsoString_parsedSuccessfully() {
-        Map<String, Object> payload = payload("svc", "INFO");
-        payload.put("timestamp", "2024-06-15T09:30:00Z");
-
-        service.process(payload); // should not throw
+        Map<String, Object> p = payload("svc", "INFO");
+        p.put("timestamp", "2024-06-15T09:30:00Z");
+        service.process(p);
     }
 
     @Test
     @DisplayName("Epoch-millis timestamp (Number) is parsed without error")
     void process_timestampAsEpochMillis_parsedSuccessfully() {
-        Map<String, Object> payload = payload("svc", "INFO");
-        payload.put("timestamp", System.currentTimeMillis());
-
-        service.process(payload); // should not throw
+        Map<String, Object> p = payload("svc", "INFO");
+        p.put("timestamp", System.currentTimeMillis());
+        service.process(p);
     }
 
     @Test
     @DisplayName("Missing timestamp falls back to Instant.now() without error")
     void process_missingTimestamp_fallsBackToNow() {
-        Map<String, Object> payload = payload("svc", "INFO");
-        payload.remove("timestamp");
-
-        service.process(payload); // should not throw
+        Map<String, Object> p = payload("svc", "INFO");
+        p.remove("timestamp");
+        service.process(p);
     }
 
     // ── Validation / error handling ───────────────────────────────────────────
@@ -165,33 +188,32 @@ class DetectorServiceTest {
     @Test
     @DisplayName("Null level field throws IllegalArgumentException and is re-thrown")
     void process_nullLevel_throwsAndRethrows() {
-        Map<String, Object> payload = payload("svc", "INFO");
-        payload.put("level", null);
+        Map<String, Object> p = payload("svc", "INFO");
+        p.put("level", null);
 
-        assertThatThrownBy(() -> service.process(payload))
+        assertThatThrownBy(() -> service.process(p))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("level");
     }
 
     @Test
-    @DisplayName("Unknown level string throws IllegalArgumentException and is re-thrown")
+    @DisplayName("Unknown level string throws IllegalArgumentException with the bad value in message")
     void process_unknownLevel_throwsAndRethrows() {
-        Map<String, Object> payload = payload("svc", "INFO");
-        payload.put("level", "VERBOSE");
+        Map<String, Object> p = payload("svc", "INFO");
+        p.put("level", "VERBOSE");
 
-        assertThatThrownBy(() -> service.process(payload))
+        assertThatThrownBy(() -> service.process(p))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("VERBOSE");
     }
 
     @Test
-    @DisplayName("Exception is re-thrown after logging — consumer can route to DLT")
-    void process_exception_isRethrown() {
-        Map<String, Object> badPayload = new HashMap<>();
-        badPayload.put("serviceId", "svc");
-        // no "level" key at all
+    @DisplayName("Missing level key throws and is re-thrown to DLT handler")
+    void process_missingLevelKey_throwsAndRethrows() {
+        Map<String, Object> p = new HashMap<>();
+        p.put("serviceId", "svc");
 
-        assertThatThrownBy(() -> service.process(badPayload))
+        assertThatThrownBy(() -> service.process(p))
                 .isInstanceOf(Exception.class);
     }
 
@@ -202,13 +224,10 @@ class DetectorServiceTest {
         bad.put("serviceId", "svc");
         bad.put("level", null);
 
-        // First call throws
         try { service.process(bad); } catch (Exception ignored) {}
 
-        // Subsequent valid calls proceed normally
-        process("svc", "INFO");
-        process("svc", "INFO");
-        process("svc", "INFO");
+        // Subsequent valid calls proceed normally — full window of INFO, no anomaly
+        for (int i = 0; i < WINDOW; i++) process("svc", "INFO");
 
         verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
     }
@@ -217,6 +236,10 @@ class DetectorServiceTest {
 
     private void process(String serviceId, String level) {
         service.process(payload(serviceId, level));
+    }
+
+    private void processN(String serviceId, String level, int n) {
+        for (int i = 0; i < n; i++) process(serviceId, level);
     }
 
     private Map<String, Object> payload(String serviceId, String level) {
