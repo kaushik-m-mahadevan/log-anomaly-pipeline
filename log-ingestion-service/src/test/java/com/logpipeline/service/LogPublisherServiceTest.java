@@ -27,15 +27,15 @@ class LogPublisherServiceTest {
 
     private static final String TOPIC = "processed-logs";
 
-    @Mock KafkaTemplate<String, LogEventMessage> kafkaTemplate;
+    @Mock(lenient = true) KafkaTemplate<String, LogEventMessage> kafkaTemplate;
 
     LogPublisherService service;
 
     @BeforeEach
     void setUp() {
-        when(kafkaTemplate.send(anyString(), anyString(), any(LogEventMessage.class)))
-                .thenReturn(new CompletableFuture<>());
         service = new LogPublisherService(kafkaTemplate, TOPIC);
+        when(kafkaTemplate.send(anyString(), anyString(), any(LogEventMessage.class)))
+                .thenReturn(CompletableFuture.completedFuture(null));
     }
 
     @Test

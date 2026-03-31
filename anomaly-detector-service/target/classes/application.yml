@@ -17,7 +17,7 @@ kafka:
     anomaly-alerts: anomaly-alerts
 
 detector:
-  window-size: ${DETECTOR_WINDOW_SIZE:20}
+  window-size: ${DETECTOR_WINDOW_SIZE:5}
   error-rate-threshold: ${DETECTOR_ERROR_RATE_THRESHOLD:0.4}
 
 server:

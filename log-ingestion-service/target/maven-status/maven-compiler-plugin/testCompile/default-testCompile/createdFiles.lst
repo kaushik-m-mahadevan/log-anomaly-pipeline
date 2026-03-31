@@ -1,0 +1,3 @@
+com\logpipeline\dto\LogEventRequestTest.class
+com\logpipeline\controller\LogIngestionControllerTest.class
+com\logpipeline\service\LogPublisherServiceTest.class

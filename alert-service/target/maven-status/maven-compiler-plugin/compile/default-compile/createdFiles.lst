@@ -1,4 +1,3 @@
-com\logpipeline\model\AnomalyEvent.class
 com\logpipeline\consumer\AnomalyEventConsumer.class
 com\logpipeline\channel\AlertChannel.class
 com\logpipeline\AlertServiceApplication.class

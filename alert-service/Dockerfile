@@ -1,12 +1,15 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
 FROM maven:3.9.6-eclipse-temurin-21-alpine AS builder
-# Cache dependencies before copying source (layer cache optimization)
-WORKDIR /app/alert-service
-COPY pom.xml ../pom.xml
-COPY alert-service/pom.xml .
-RUN mvn dependency:go-offline -q
-COPY alert-service/src ./src
-RUN mvn clean package -DskipTests -q
+WORKDIR /app
+# Copy all source and POM files
+COPY pom.xml .
+COPY common/pom.xml common/
+COPY common/src common/src
+COPY alert-service/pom.xml alert-service/
+COPY alert-service/src alert-service/src
+# Build common first, then alert-service
+RUN cd common && mvn clean install -DskipTests -q && \
+    cd ../alert-service && mvn clean package -DskipTests -q
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM eclipse-temurin:21-jre-alpine

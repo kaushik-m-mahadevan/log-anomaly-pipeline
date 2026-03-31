@@ -1,5 +1,6 @@
 com\logpipeline\dto\LogEventBatchRequest.class
 com\logpipeline\dto\LogEventRequest.class
+com\logpipeline\exception\GlobalExceptionHandler.class
 com\logpipeline\config\TopicConfig.class
 com\logpipeline\dto\LogEventMessage.class
 com\logpipeline\controller\LogIngestionController.class

@@ -1,0 +1,2 @@
+com\logpipeline\service\AlertRoutingServiceTest.class
+com\logpipeline\channel\ConsoleAlertChannelTest.class

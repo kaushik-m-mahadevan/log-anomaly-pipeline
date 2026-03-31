@@ -5,8 +5,6 @@ D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\log
 D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\logpipeline\detector\AnomalyDetector.java
 D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\logpipeline\detector\ErrorRateSpikeDetector.java
 D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\logpipeline\LogAnomalyDetectorApplication.java
-D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\logpipeline\model\AnomalyEvent.java
-D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\logpipeline\model\AnomalySeverity.java
 D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\logpipeline\model\LogEvent.java
 D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\logpipeline\model\LogLevel.java
 D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\src\main\java\com\logpipeline\service\DetectorService.java
