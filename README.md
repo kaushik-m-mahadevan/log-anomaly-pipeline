@@ -1,21 +1,21 @@
 # Log Anomaly Detection Pipeline
 
-A production-grade, event-driven microservices system that ingests application logs, detects statistical anomalies in real time using a sliding-window Z-score algorithm, and routes alerts through a dedicated notification service — all orchestrated on Kubernetes with horizontal autoscaling.
+A production-grade, event-driven microservices system that ingests application logs in batches, detects error rate anomalies in real time using a sliding-window algorithm, and routes structured alerts through a dedicated notification service — containerised with Docker and designed for Kubernetes deployment.
 
-> Built to demonstrate distributed systems design patterns: async messaging, stateful stream processing, and container orchestration at scale.
+> Built to demonstrate distributed systems design patterns: async messaging, stateful stream processing, and clean microservice architecture.
 
 ---
 
 ## Architecture overview
 
 ```
-┌─────────────────────┐        raw-logs topic         ┌──────────────────────────┐
+┌─────────────────────┐      processed-logs topic      ┌──────────────────────────┐
 │  log-ingestion-     │ ─────────────────────────────► │  anomaly-detector-       │
 │  service            │                                │  service                 │
 │                     │                                │                          │
-│  REST API           │                                │  Sliding-window Z-score  │
+│  REST API (batch)   │                                │  Sliding-window detector │
 │  Kafka Producer     │                                │  Kafka Consumer Group    │
-│  Structured log DTO │                                │  Stateful detection      │
+│  Structured log DTO │                                │  Stateful error rate     │
 └─────────────────────┘                                └──────────────┬───────────┘
                                                                       │
                                                          anomaly-alerts topic
@@ -35,37 +35,42 @@ A production-grade, event-driven microservices system that ingests application l
 | Decision | Choice | Rationale |
 |---|---|---|
 | Messaging | Apache Kafka | Durable, replayable event log; decouples producers from consumers; enables independent scaling per tier |
-| Detection algorithm | Sliding-window Z-score | Stateful, parameter-free baseline; adapts to traffic patterns without manual threshold tuning |
+| Detection algorithm | Sliding-window error rate | Maintains a fixed-size window of recent events per service; fires when error proportion exceeds a configurable threshold |
 | Topic design | One topic per event type | Avoids the anti-pattern of a single catch-all topic; enables per-topic retention and consumer group isolation |
-| Scaling target | Detector service (HPA) | The CPU-bound anomaly detection tier is the correct scaling bottleneck — not ingestion or alerting |
-| Dead-letter handling | Dedicated DLT per topic | Poison messages are quarantined, not silently dropped — a production requirement |
+| Scaling target | Detector service | The stateful detection tier is the correct scaling bottleneck — not ingestion or alerting |
+| Dead-letter handling | `@RetryableTopic` with DLT | Poison messages are retried with exponential backoff then routed to a dead-letter topic — not silently dropped |
+| Alert extensibility | Strategy pattern (`AlertChannel`) | New delivery channels (email, webhook, PagerDuty) are added by implementing one interface — zero changes to routing logic |
 
 ---
 
 ## Services
 
 ### `log-ingestion-service`
-Exposes a REST endpoint that accepts structured log events and publishes them to the `raw-logs` Kafka topic. Acts as the entry point to the pipeline.
+Exposes a REST API that accepts batches of structured log events and publishes them to the `processed-logs` Kafka topic.
 
-- REST `POST /api/v1/logs` with `LogEventRequest` DTO validation
-- `KafkaProducerConfig` with idempotent producer settings
-- Partition key on `serviceId` — ensures log ordering per source service
-- `application.yml` externalises all Kafka and topic config (no hardcoded broker URLs)
+- `POST /api/v1/logs/batch` — accepts up to 500 events per request
+- `POST /api/v1/logs` — convenience single-event endpoint
+- Bean validation on all inbound fields (`@NotBlank`, `@Pattern` on log level)
+- Partition key on `serviceId` — ensures all logs from the same service land on the same partition
+- Idempotent Kafka producer — `acks=all`, `enable.idempotence=true`
+- Returns `202 Accepted` — fire-and-forget; does not wait for downstream processing
 
 ### `anomaly-detector-service`
-Consumes from `raw-logs`, runs the Z-score detection algorithm over a sliding window of recent log-error rates, and publishes `AnomalyEvent`s to the `anomaly-alerts` topic when a threshold is breached.
+Consumes from `processed-logs`, evaluates each event against a per-service sliding window, and publishes `AnomalyEvent`s to `anomaly-alerts` when an error rate spike is detected.
 
-- `SlidingWindowZScoreDetector` — pure domain class, zero framework dependencies, fully unit-testable
-- Consumer group `detector-group` with manual offset commit for at-least-once delivery guarantees
-- Dead-letter topic routing for malformed or unprocessable events
-- `DetectorService` separates Kafka I/O from detection logic (SRP)
+- `ErrorRateSpikeDetector` — pure domain class, zero Spring dependencies, fully unit-testable
+- One detector instance per `serviceId`, lazily initialised and stored in a `ConcurrentHashMap`
+- Window size and error rate threshold are externalised via environment variables
+- `@RetryableTopic` — non-blocking retries with exponential backoff; exhausted messages routed to `processed-logs-dlt`
+- `DetectorService` owns all Kafka I/O — the detector interface knows nothing about messaging (SRP)
 
 ### `alert-service`
-Consumes anomaly events and handles downstream fanout — structured logging, extensible to webhook or email delivery.
+Consumes anomaly events and fans out to all registered alert channels.
 
-- Idiomatic `@KafkaListener` with typed deserialization
-- Alert enrichment (severity classification, timestamp normalization)
-- Designed for extension via Strategy pattern for multiple alert channels
+- `AlertChannel` interface — Strategy pattern; each channel is an independent `@Component`
+- `ConsoleAlertChannel` — MVP implementation; structured log output with severity, service, and description
+- `AlertRoutingService` — Spring injects all `AlertChannel` implementations automatically; adding a new channel requires zero changes here
+- Designed for extension to email, SMS, webhook, or PagerDuty without touching routing logic
 
 ---
 
@@ -76,12 +81,10 @@ Consumes anomaly events and handles downstream fanout — structured logging, ex
 | Language | Java 21 |
 | Framework | Spring Boot 3.2 |
 | Messaging | Apache Kafka 3.6 |
-| Containerisation | Docker |
-| Orchestration | Kubernetes (Minikube) |
-| Autoscaling | Horizontal Pod Autoscaler (HPA) on detector |
-| Config management | Kubernetes ConfigMaps + Secrets |
-| Build | Maven (multi-module) |
-| Testing | JUnit 5, Mockito, Spring Kafka Test (EmbeddedKafka) |
+| Containerisation | Docker + Docker Compose |
+| Orchestration | Kubernetes (Minikube) — manifests planned for v2 |
+| Build | Maven (multi-module parent POM) |
+| Testing | JUnit 5, Mockito |
 
 ---
 
@@ -90,38 +93,34 @@ Consumes anomaly events and handles downstream fanout — structured logging, ex
 ```
 log-anomaly-pipeline/
 │
-├── log-ingestion-service/          # Kafka producer + REST entry point
+├── log-ingestion-service/
 │   └── src/main/java/com/logpipeline/
-│       ├── config/                 # KafkaProducerConfig, TopicConfig
-│       ├── controller/             # LogIngestionController
-│       ├── dto/                    # LogEventRequest, LogEventMessage
-│       └── service/                # LogPublisherService
+│       ├── config/       KafkaProducerConfig, TopicConfig
+│       ├── controller/   LogIngestionController
+│       ├── dto/          LogEventRequest, LogEventBatchRequest, LogEventMessage
+│       └── service/      LogPublisherService
 │
-├── anomaly-detector-service/       # Core detection logic + Kafka consumer
+├── anomaly-detector-service/
 │   └── src/main/java/com/logpipeline/
-│       ├── config/                 # KafkaConsumerConfig, KafkaProducerConfig
-│       ├── consumer/               # LogEventConsumer (Kafka listener)
-│       ├── detector/               # SlidingWindowZScoreDetector (pure domain)
-│       ├── model/                  # AnomalyEvent, LogEvent, WindowMetrics
-│       └── service/                # DetectorService (orchestrates pipeline)
+│       ├── config/       KafkaConsumerConfig, KafkaProducerConfig, TopicConfig
+│       ├── consumer/     LogEventConsumer
+│       ├── detector/     AnomalyDetector (interface), ErrorRateSpikeDetector
+│       ├── model/        LogEvent, LogLevel, AnomalyEvent, AnomalySeverity
+│       └── service/      DetectorService
 │
-├── alert-service/                  # Anomaly consumer + alert routing
+├── alert-service/
 │   └── src/main/java/com/logpipeline/
-│       ├── config/                 # KafkaConsumerConfig
-│       ├── consumer/               # AnomalyEventConsumer
-│       └── service/                # AlertRoutingService
-│
-├── k8s/
-│   ├── kafka/                      # Kafka + Zookeeper manifests
-│   ├── ingestion/                  # Deployment, Service, ConfigMap
-│   ├── detector/                   # Deployment, HPA, ConfigMap
-│   └── alert/                      # Deployment, Service, ConfigMap
+│       ├── channel/      AlertChannel (interface), ConsoleAlertChannel
+│       ├── config/       KafkaConsumerConfig
+│       ├── consumer/     AnomalyEventConsumer
+│       ├── model/        AnomalyEvent
+│       └── service/      AlertRoutingService
 │
 ├── docker/
-│   └── docker-compose.yml          # Local dev: all services + Kafka + Zookeeper
+│   └── docker-compose.yml   # Kafka + Zookeeper + all three services
 │
 └── docs/
-    └── diagrams/                   # Architecture and sequence diagrams
+    └── diagrams/
 ```
 
 ---
@@ -129,102 +128,146 @@ log-anomaly-pipeline/
 ## Key design decisions & trade-offs
 
 ### Stateful detection without a stateful framework
-The `SlidingWindowZScoreDetector` maintains an in-memory circular buffer per `serviceId`. This is a deliberate trade-off: it avoids the operational complexity of Kafka Streams or Flink while demonstrating the core algorithmic challenge of stateful stream processing. The trade-off (state lost on pod restart) is explicitly acknowledged and addressed in the [scaling notes](#scaling-and-state-considerations).
-
-### At-least-once delivery
-The detector consumer uses manual offset commits, flushed only after successful anomaly evaluation and downstream publish. This means a pod crash can cause re-processing of the last uncommitted batch — an acceptable duplicate-detection risk that is orders of magnitude safer than at-most-once (silent data loss).
+`ErrorRateSpikeDetector` maintains an in-memory circular buffer (`ArrayDeque`) per `serviceId`. This deliberately avoids the operational complexity of Kafka Streams or Flink while still demonstrating the core challenge of stateful stream processing. The trade-off — window state is lost on pod restart or rebalance — is explicitly acknowledged. The production path (externalising state to Redis keyed by partition) is documented as a roadmap item.
 
 ### Partition key strategy
-Log events are keyed by `serviceId` on publish. This guarantees that all logs from a given upstream service land on the same partition and are processed by the same detector consumer instance — preserving the per-service sliding window without cross-partition state sharing.
+Log events are published with `serviceId` as the Kafka partition key. This guarantees all logs from the same upstream service land on the same partition and are consumed by the same detector instance — preserving per-service window state without cross-partition coordination.
 
----
+### Delivery guarantees
+The consumer uses Kafka's auto-commit with `@RetryableTopic` for non-blocking retries. On repeated failure, the original message is routed to `processed-logs-dlt` (dead-letter topic) rather than being dropped. This is a deliberate trade-off: simpler than manual offset management while still providing a recoverable failure path.
 
-## Scaling and state considerations
-
-The detector HPA is configured to scale on CPU utilisation. As replicas increase, Kafka's consumer group rebalancing automatically redistributes partitions. Because window state is held in-memory per-instance, a rebalance triggers a warm-up period where the new consumer rebuilds its window from recently consumed events.
-
-**Production path:** For stateless scaling, the window state would be externalised to Redis (per-partition key). This is noted as a documented extension point in `DetectorService`.
+### Alert channel extensibility
+`AlertRoutingService` depends on `List<AlertChannel>` — Spring injects every `@Component` that implements the interface. Adding email or webhook delivery means implementing `AlertChannel` and annotating with `@Component`. This is the Open/Closed principle in practice: the routing logic is closed for modification, open for extension.
 
 ---
 
 ## Running locally
 
 ### Prerequisites
-- Docker Desktop
-- Minikube + kubectl
-- Java 21, Maven 3.9+
+- Docker Desktop (running)
+- Java 21
+- Maven 3.9+
 
-### Quick start (Docker Compose)
+### Step 1 — start Kafka
 
 ```bash
-# Start Kafka, Zookeeper, and all three services
-docker-compose -f docker/docker-compose.yml up --build
+docker compose -f docker/docker-compose.yml up zookeeper kafka -d
+```
 
-# Send a test log event
-curl -X POST http://localhost:8080/api/v1/logs \
+Wait until both show `healthy`:
+
+```bash
+docker compose -f docker/docker-compose.yml ps
+```
+
+### Step 2 — start the services
+
+Open three separate terminals from the project root:
+
+```bash
+# Terminal 1
+cd log-ingestion-service && mvn spring-boot:run
+
+# Terminal 2
+cd anomaly-detector-service && mvn spring-boot:run
+
+# Terminal 3
+cd alert-service && mvn spring-boot:run
+```
+
+### Step 3 — trigger an anomaly
+
+Send a batch of ERROR events to breach the detection threshold. With default settings (`window-size=20`, `error-rate-threshold=0.4`), you need 8+ errors in a 20-event window.
+
+```bash
+curl -X POST http://localhost:8080/api/v1/logs/batch \
   -H "Content-Type: application/json" \
   -d '{
-    "serviceId": "payment-service",
-    "level": "ERROR",
-    "message": "Connection timeout to downstream",
-    "timestamp": "2024-01-15T10:30:00Z"
+    "events": [
+      { "serviceId": "payment-service", "level": "ERROR", "message": "Timeout #1" },
+      { "serviceId": "payment-service", "level": "ERROR", "message": "Timeout #2" },
+      { "serviceId": "payment-service", "level": "ERROR", "message": "Timeout #3" },
+      { "serviceId": "payment-service", "level": "ERROR", "message": "Timeout #4" },
+      { "serviceId": "payment-service", "level": "ERROR", "message": "Timeout #5" },
+      { "serviceId": "payment-service", "level": "ERROR", "message": "Timeout #6" },
+      { "serviceId": "payment-service", "level": "ERROR", "message": "Timeout #7" },
+      { "serviceId": "payment-service", "level": "ERROR", "message": "Timeout #8" },
+      { "serviceId": "payment-service", "level": "INFO",  "message": "Recovered" },
+      { "serviceId": "payment-service", "level": "INFO",  "message": "Recovered" }
+    ]
   }'
 ```
 
-### Kubernetes (Minikube)
+Watch the `alert-service` terminal for the anomaly banner.
+
+**Tip:** For faster local testing, lower the window size in `anomaly-detector-service/src/main/resources/application.yml`:
+
+```yaml
+detector:
+  window-size: 5
+  error-rate-threshold: 0.4
+```
+
+3 errors in 5 events (60%) will trigger an alert.
+
+### Step 4 — inspect Kafka topics directly
 
 ```bash
-# Start Minikube and enable metrics server (required for HPA)
-minikube start
-minikube addons enable metrics-server
+# List all topics
+docker exec -it <kafka-container-name> kafka-topics.sh \
+  --list --bootstrap-server localhost:9092
 
-# Deploy Kafka
-kubectl apply -f k8s/kafka/
+# Watch the processed-logs topic live
+docker exec -it <kafka-container-name> kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic processed-logs \
+  --from-beginning
 
-# Deploy services
-kubectl apply -f k8s/ingestion/
-kubectl apply -f k8s/detector/
-kubectl apply -f k8s/alert/
-
-# Watch HPA scale the detector under load
-kubectl get hpa anomaly-detector-hpa --watch
-
-# Expose ingestion service for local testing
-minikube service log-ingestion-service --url
+# Watch the anomaly-alerts topic live
+docker exec -it <kafka-container-name> kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic anomaly-alerts \
+  --from-beginning
 ```
 
 ---
 
-## Testing strategy
+## Detection algorithm
 
-| Test type | Scope | Tool |
-|---|---|---|
-| Unit | `SlidingWindowZScoreDetector` — pure algorithm, no Spring context | JUnit 5 + Mockito |
-| Unit | `DetectorService` — mocked Kafka template, verifies routing logic | JUnit 5 + Mockito |
-| Integration | Kafka producer → consumer round-trip | `@EmbeddedKafka` (Spring Kafka Test) |
-| Contract | `LogEventRequest` validation (field constraints, null checks) | JUnit 5 |
+`ErrorRateSpikeDetector` uses a sliding window over the most recent N log events per service:
 
-The detector algorithm is tested independently of all Kafka infrastructure — this is intentional. Coupling algorithm tests to a Kafka context would make the test suite slow and brittle.
+```
+window = circular buffer of N boolean observations (true = ERROR or FATAL)
+error_rate = count(errors in window) / window_size
+
+if error_rate >= threshold → publish AnomalyEvent with severity classification:
+  >= 90% → CRITICAL
+  >= 70% → HIGH
+  >= 50% → MEDIUM
+  >= 40% → LOW
+```
+
+The window fills before detection begins — no false positives on cold start. Detection is skipped until the buffer holds `window_size` observations.
+
+**Planned upgrade:** Replace with a Z-score algorithm so the detector adapts to each service's natural baseline rather than using a fixed threshold. A service that normally errors 30% of the time will not alert on its own baseline — only on statistically significant deviations.
 
 ---
 
 ## What this project demonstrates
 
-This PoC is scoped to show specific distributed systems competencies, not to be a full production system:
-
 - **Async, decoupled service communication** via Kafka — services have zero runtime dependencies on each other
-- **Stateful stream processing** — sliding window algorithm with per-partition state affinity
-- **Horizontal autoscaling** — Kubernetes HPA on the correct bottleneck tier
-- **Production-grade Kafka configuration** — idempotent producers, manual commits, dead-letter topics, consumer group design
-- **Externalized configuration** — no hardcoded infrastructure config; all Kafka and topic settings flow through ConfigMaps
-- **Clean architecture** — detection algorithm is a pure domain class; Kafka I/O never leaks into business logic
+- **Stateful stream processing** — per-service sliding window with partition affinity via Kafka key routing
+- **Production-grade Kafka configuration** — idempotent producers, `@RetryableTopic` with exponential backoff, dead-letter topic routing
+- **Clean architecture** — detector is a pure domain interface; Kafka I/O never leaks into business logic
+- **Extensibility by design** — Strategy pattern on alert channels; Open/Closed principle enforced structurally
 
 ---
 
-## Roadmap / extension points
+## Roadmap
 
+- [ ] Kubernetes manifests — Deployments, ConfigMaps, HPA on detector service
+- [ ] Z-score detector — statistically adaptive baseline per service
 - [ ] Externalise window state to Redis for stateless horizontal scaling
-- [ ] Add Prometheus metrics endpoint (`/actuator/prometheus`) + Grafana dashboard
-- [ ] Implement webhook alert channel in `alert-service` (Strategy pattern slot already defined)
-- [ ] Add Kafka Streams DSL variant of the detector for comparison
+- [ ] Prometheus metrics (`/actuator/prometheus`) + Grafana dashboard
+- [ ] Webhook alert channel — first extension of `AlertChannel` beyond console
 - [ ] Schema Registry + Avro serialization for `LogEvent` and `AnomalyEvent`

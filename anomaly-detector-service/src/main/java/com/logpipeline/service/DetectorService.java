@@ -69,7 +69,7 @@ public class DetectorService {
             Optional<AnomalyEvent> anomaly = detector.evaluate(event);
 
             anomaly.ifPresent(a -> {
-                log.warn("[{}] Anomaly detected by {}: {} (value={:.2f}, threshold={:.2f})",
+                log.warn("[{}] Anomaly detected by {}: {} (value={}, threshold={})",
                         a.serviceId(), detector.name(), a.description(),
                         a.detectedValue(), a.threshold());
                 publishAnomaly(a);
@@ -124,3 +124,4 @@ public class DetectorService {
                 });
     }
 }
+

@@ -4,5 +4,6 @@ D:\Downloads\log-anomaly-pipeline\log-ingestion-service\src\main\java\com\logpip
 D:\Downloads\log-anomaly-pipeline\log-ingestion-service\src\main\java\com\logpipeline\dto\LogEventBatchRequest.java
 D:\Downloads\log-anomaly-pipeline\log-ingestion-service\src\main\java\com\logpipeline\dto\LogEventMessage.java
 D:\Downloads\log-anomaly-pipeline\log-ingestion-service\src\main\java\com\logpipeline\dto\LogEventRequest.java
+D:\Downloads\log-anomaly-pipeline\log-ingestion-service\src\main\java\com\logpipeline\exception\ExceptionHandler.java
 D:\Downloads\log-anomaly-pipeline\log-ingestion-service\src\main\java\com\logpipeline\LogIngestionServiceApplication.java
 D:\Downloads\log-anomaly-pipeline\log-ingestion-service\src\main\java\com\logpipeline\service\LogPublisherService.java
