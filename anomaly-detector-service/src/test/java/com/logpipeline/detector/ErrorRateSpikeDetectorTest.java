@@ -113,6 +113,162 @@ class ErrorRateSpikeDetectorTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    // ── Severity classification ───────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Should classify HIGH severity at 70-89% error rate")
+    void shouldClassifyHighSeverity() {
+        // Use window=10, threshold=0.5 to exercise HIGH band: 8/10 = 80%
+        ErrorRateSpikeDetector d = new ErrorRateSpikeDetector(10, 0.5);
+        for (int i = 0; i < 8; i++) d.evaluate(errorEvent());
+        for (int i = 0; i < 2; i++) d.evaluate(infoEvent());
+
+        // Re-evaluate with an error to force window evaluation at 80%
+        ErrorRateSpikeDetector d2 = new ErrorRateSpikeDetector(10, 0.5);
+        for (int i = 0; i < 7; i++) d2.evaluate(errorEvent());
+        for (int i = 0; i < 2; i++) d2.evaluate(infoEvent());
+        Optional<AnomalyEvent> result = d2.evaluate(errorEvent()); // 8/10 = 80%
+
+        assertThat(result).isPresent();
+        assertThat(result.get().severity()).isEqualTo(AnomalySeverity.HIGH);
+    }
+
+    @Test
+    @DisplayName("Should classify MEDIUM severity at 50-69% error rate")
+    void shouldClassifyMediumSeverity() {
+        // 6/10 = 60% → MEDIUM
+        ErrorRateSpikeDetector d = new ErrorRateSpikeDetector(10, 0.4);
+        for (int i = 0; i < 5; i++) d.evaluate(errorEvent());
+        for (int i = 0; i < 4; i++) d.evaluate(infoEvent());
+        Optional<AnomalyEvent> result = d.evaluate(errorEvent()); // 6/10 = 60%
+
+        assertThat(result).isPresent();
+        assertThat(result.get().severity()).isEqualTo(AnomalySeverity.MEDIUM);
+    }
+
+    @Test
+    @DisplayName("Should classify LOW severity at threshold to 49% error rate")
+    void shouldClassifyLowSeverity() {
+        // threshold=0.3, 4/10 = 40% → LOW (< 50%)
+        ErrorRateSpikeDetector d = new ErrorRateSpikeDetector(10, 0.3);
+        for (int i = 0; i < 3; i++) d.evaluate(errorEvent());
+        for (int i = 0; i < 6; i++) d.evaluate(infoEvent());
+        Optional<AnomalyEvent> result = d.evaluate(errorEvent()); // 4/10 = 40%
+
+        assertThat(result).isPresent();
+        assertThat(result.get().severity()).isEqualTo(AnomalySeverity.LOW);
+    }
+
+    // ── Threshold boundary ────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Should NOT trigger when error rate is just below threshold")
+    void shouldNotTriggerJustBelowThreshold() {
+        // 1 error in 5 events = 20% < 40% threshold
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        Optional<AnomalyEvent> result = detector.evaluate(errorEvent()); // 1/5 = 20%
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Anomaly description includes rate, window size, and threshold")
+    void anomalyDescription_containsRateAndWindowInfo() {
+        for (int i = 0; i < 4; i++) detector.evaluate(errorEvent());
+        Optional<AnomalyEvent> result = detector.evaluate(errorEvent()); // 5/5 = 100%
+
+        assertThat(result).isPresent();
+        String desc = result.get().description();
+        assertThat(desc).contains("100.0%");
+        assertThat(desc).contains("5"); // window size
+    }
+
+    @Test
+    @DisplayName("Anomaly event carries correct detectedValue and threshold")
+    void anomalyEvent_hasCorrectDetectedValueAndThreshold() {
+        // 2 errors in 5 = 40% at threshold
+        detector.evaluate(errorEvent());
+        detector.evaluate(errorEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        Optional<AnomalyEvent> result = detector.evaluate(infoEvent());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().detectedValue()).isEqualTo(0.4);
+        assertThat(result.get().threshold()).isEqualTo(THRESHOLD);
+    }
+
+    // ── Edge cases ────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Window size 1 — single error triggers immediately")
+    void windowSizeOne_singleError_triggersImmediately() {
+        ErrorRateSpikeDetector d = new ErrorRateSpikeDetector(1, 1.0);
+        Optional<AnomalyEvent> result = d.evaluate(errorEvent());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().severity()).isEqualTo(AnomalySeverity.CRITICAL);
+    }
+
+    @Test
+    @DisplayName("Window size 1 — single INFO never triggers")
+    void windowSizeOne_singleInfo_neverTriggers() {
+        ErrorRateSpikeDetector d = new ErrorRateSpikeDetector(1, 1.0);
+        Optional<AnomalyEvent> result = d.evaluate(infoEvent());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("DEBUG and WARN are not counted as errors")
+    void debugAndWarnEvents_notCountedAsErrors() {
+        for (int i = 0; i < 3; i++) detector.evaluate(debugEvent());
+        for (int i = 0; i < 1; i++) detector.evaluate(warnEvent());
+        Optional<AnomalyEvent> result = detector.evaluate(infoEvent()); // 0/5 = 0%
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    @DisplayName("name() returns detector identifier")
+    void name_returnsExpectedValue() {
+        assertThat(detector.name()).isEqualTo("error-rate-spike");
+    }
+
+    @Test
+    @DisplayName("Anomaly event has non-null UUID anomaly ID")
+    void anomalyEvent_hasNonNullId() {
+        for (int i = 0; i < 4; i++) detector.evaluate(errorEvent());
+        Optional<AnomalyEvent> result = detector.evaluate(errorEvent());
+
+        assertThat(result).isPresent();
+        assertThat(result.get().anomalyId()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("Anomaly event carries the serviceId of the triggering event")
+    void anomalyEvent_hasCorrectServiceId() {
+        ErrorRateSpikeDetector d = new ErrorRateSpikeDetector(WINDOW_SIZE, THRESHOLD);
+        LogEvent event = new LogEvent(
+                "evt-1", "payment-service", LogLevel.ERROR, "msg", Instant.now(), "msg");
+
+        for (int i = 0; i < 4; i++) d.evaluate(event);
+        Optional<AnomalyEvent> result = d.evaluate(event);
+
+        assertThat(result).isPresent();
+        assertThat(result.get().serviceId()).isEqualTo("payment-service");
+    }
+
+    @Test
+    @DisplayName("Negative window size rejected")
+    void negativeWindowSize_isRejected() {
+        assertThatThrownBy(() -> new ErrorRateSpikeDetector(-1, 0.5))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     // ── Test data builders ───────────────────────────────────────────────────
 
     private LogEvent errorEvent() {
@@ -125,6 +281,14 @@ class ErrorRateSpikeDetectorTest {
 
     private LogEvent fatalEvent() {
         return event(LogLevel.FATAL);
+    }
+
+    private LogEvent debugEvent() {
+        return event(LogLevel.DEBUG);
+    }
+
+    private LogEvent warnEvent() {
+        return event(LogLevel.WARN);
     }
 
     private LogEvent event(LogLevel level) {
