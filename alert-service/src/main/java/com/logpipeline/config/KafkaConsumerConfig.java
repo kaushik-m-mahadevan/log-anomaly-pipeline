@@ -29,7 +29,7 @@ public class KafkaConsumerConfig {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         JsonDeserializer<AnomalyEvent> deserializer =
                 new JsonDeserializer<>(AnomalyEvent.class, mapper);
-        deserializer.addTrustedPackages("*");
+        deserializer.addTrustedPackages("com.logpipeline.model");
         deserializer.setUseTypeHeaders(false);
 
         return new DefaultKafkaConsumerFactory<>(Map.of(

@@ -94,10 +94,21 @@ public class DetectorService {
             timestamp = Instant.now();
         }
 
+        String rawLevel = (String) payload.get("level");
+        if (rawLevel == null) {
+            throw new IllegalArgumentException("Missing required field 'level' in log event payload");
+        }
+        LogLevel level;
+        try {
+            level = LogLevel.valueOf(rawLevel);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unknown log level '" + rawLevel + "' in log event payload");
+        }
+
         return new LogEvent(
                 (String) payload.get("eventId"),
                 (String) payload.get("serviceId"),
-                LogLevel.valueOf((String) payload.get("level")),
+                level,
                 (String) payload.get("message"),
                 timestamp,
                 (String) payload.getOrDefault("normalizedMessage", "")

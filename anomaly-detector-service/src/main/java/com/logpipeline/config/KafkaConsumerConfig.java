@@ -29,7 +29,7 @@ public class KafkaConsumerConfig {
     public ConsumerFactory<String, Map<String, Object>> consumerFactory() {
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         JsonDeserializer<Map<String, Object>> deserializer = new JsonDeserializer<>(new TypeReference<Map<String, Object>>() {}, mapper);
-        deserializer.addTrustedPackages("*");
+        deserializer.addTrustedPackages("java.util", "java.lang");
         deserializer.setUseTypeHeaders(false);
 
         return new DefaultKafkaConsumerFactory<>(Map.of(
