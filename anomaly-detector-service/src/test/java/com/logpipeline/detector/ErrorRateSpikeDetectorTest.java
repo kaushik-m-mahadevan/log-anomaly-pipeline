@@ -102,6 +102,93 @@ class ErrorRateSpikeDetectorTest {
         assertThat(result).isPresent(); // 2/5 = 40%
     }
 
+    // ── Cooldown / deduplication ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Subsequent events above threshold do not re-fire while anomaly is active")
+    void shouldSuppressAlerts_whileAnomalyIsActive() {
+        // Trigger anomaly: 2 errors → window full at 40%
+        detector.evaluate(errorEvent());
+        detector.evaluate(errorEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        Optional<AnomalyEvent> firstFire = detector.evaluate(infoEvent()); // 2/5 = 40% → fires
+        assertThat(firstFire).isPresent();
+
+        // Same error rate sustained — should be suppressed, not re-fired
+        Optional<AnomalyEvent> suppressed1 = detector.evaluate(errorEvent()); // still above threshold
+        Optional<AnomalyEvent> suppressed2 = detector.evaluate(errorEvent());
+        assertThat(suppressed1).isEmpty();
+        assertThat(suppressed2).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Detector re-arms after error rate recovers below threshold")
+    void shouldRearm_afterRateRecovers() {
+        // Fire anomaly
+        detector.evaluate(errorEvent());
+        detector.evaluate(errorEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent()); // 2/5 = 40% → fires
+
+        // Flood with INFO to push rate below threshold
+        detector.evaluate(infoEvent()); // 1/5 = 20% → re-arms
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent()); // 0/5 = 0% — fully recovered
+
+        // New spike — should fire again after recovery
+        detector.evaluate(errorEvent());
+        detector.evaluate(errorEvent());
+        detector.evaluate(infoEvent());
+        detector.evaluate(infoEvent());
+        Optional<AnomalyEvent> refire = detector.evaluate(infoEvent()); // 2/5 = 40% → fires again
+        assertThat(refire).isPresent();
+    }
+
+    @Test
+    @DisplayName("Exactly one alert fires per outage — fire, suppress, recover, fire again")
+    void exactlyOneAlertPerOutage_withRecoveryInBetween() {
+        // Outage 1
+        for (int i = 0; i < 4; i++) detector.evaluate(errorEvent());
+        Optional<AnomalyEvent> outage1 = detector.evaluate(errorEvent()); // 5/5 = 100%
+        assertThat(outage1).isPresent();
+
+        // Sustained — more errors should all be suppressed
+        for (int i = 0; i < 3; i++) {
+            assertThat(detector.evaluate(errorEvent())).isEmpty();
+        }
+
+        // Recovery
+        for (int i = 0; i < WINDOW_SIZE; i++) detector.evaluate(infoEvent());
+
+        // Outage 2
+        for (int i = 0; i < 4; i++) detector.evaluate(errorEvent());
+        Optional<AnomalyEvent> outage2 = detector.evaluate(errorEvent()); // 5/5 = 100%
+        assertThat(outage2).isPresent();
+
+        // Both anomaly IDs should be distinct (separate events)
+        assertThat(outage1.get().anomalyId()).isNotEqualTo(outage2.get().anomalyId());
+    }
+
+    @Test
+    @DisplayName("Alert is suppressed when rate stays well above threshold during an active anomaly")
+    void shouldSuppressAlerts_whileRateRemainsHighAboveThreshold() {
+        // Fill window with all errors to trigger CRITICAL anomaly
+        for (int i = 0; i < WINDOW_SIZE; i++) detector.evaluate(errorEvent());
+        // The 5th event fires — anomalyActive = true
+
+        // Keep feeding errors — rate stays at 100%, but every subsequent call is suppressed
+        int suppressedCount = 0;
+        for (int i = 0; i < 10; i++) {
+            if (detector.evaluate(errorEvent()).isEmpty()) suppressedCount++;
+        }
+
+        assertThat(suppressedCount).isEqualTo(10);
+    }
+
     @Test
     @DisplayName("Should reject invalid constructor arguments")
     void shouldRejectInvalidArguments() {

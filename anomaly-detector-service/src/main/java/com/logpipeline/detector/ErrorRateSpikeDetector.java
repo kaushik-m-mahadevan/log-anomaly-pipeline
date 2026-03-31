@@ -34,6 +34,15 @@ public class ErrorRateSpikeDetector implements AnomalyDetector {
     private final Deque<Boolean> window;  // true = error event
 
     /**
+     * Tracks whether an anomaly is currently active for this service.
+     * Ensures alerts fire once on the healthy→anomalous transition, then are
+     * suppressed until the error rate recovers below the threshold (re-arming).
+     * Without this, a sustained outage would flood the alert channel on every
+     * incoming event.
+     */
+    private boolean anomalyActive = false;
+
+    /**
      * @param windowSize          number of recent events to track per service
      * @param errorRateThreshold  fraction of errors that triggers an anomaly (0.0–1.0)
      */
@@ -59,9 +68,15 @@ public class ErrorRateSpikeDetector implements AnomalyDetector {
         double errorRate = computeErrorRate();
 
         if (errorRate >= errorRateThreshold) {
+            if (anomalyActive) {
+                return Optional.empty();  // still in anomaly state — suppress until recovery
+            }
+            anomalyActive = true;
             return Optional.of(buildAnomalyEvent(event, errorRate));
         }
 
+        // Rate has fallen back below threshold — re-arm for the next spike
+        anomalyActive = false;
         return Optional.empty();
     }
 
