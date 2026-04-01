@@ -1,5 +1,0 @@
-# Created at 2026-03-31T19:53:52.830
-Boot Manifest-JAR contains absolute paths in classpath 'D:\Downloads\log-anomaly-pipeline\anomaly-detector-service\target\test-classes'
-Hint: <argLine>-Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
-'other' has different root
-

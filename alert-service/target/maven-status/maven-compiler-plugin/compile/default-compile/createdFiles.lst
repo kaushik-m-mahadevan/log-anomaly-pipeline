@@ -1,6 +1,0 @@
-com\logpipeline\consumer\AnomalyEventConsumer.class
-com\logpipeline\channel\AlertChannel.class
-com\logpipeline\AlertServiceApplication.class
-com\logpipeline\config\KafkaConsumerConfig.class
-com\logpipeline\channel\ConsoleAlertChannel.class
-com\logpipeline\service\AlertRoutingService.class

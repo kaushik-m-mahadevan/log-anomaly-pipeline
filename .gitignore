@@ -1,4 +1,5 @@
-target/
+# Maven build output — covers root and all submodules
+**/target/
 *.class
 *.jar
 *.war
