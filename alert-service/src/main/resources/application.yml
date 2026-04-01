@@ -29,6 +29,11 @@ management:
     health:
       show-details: always
 
+slack:
+  # Set SLACK_WEBHOOK_URL env var (or override here) to enable Slack alerts.
+  # Leave blank/unset to disable — SlackAlertChannel will not be registered.
+  webhook-url: ${SLACK_WEBHOOK_URL:}
+
 logging:
   level:
     com.logpipeline: INFO

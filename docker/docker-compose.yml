@@ -62,5 +62,6 @@ services:
       - "8082:8082"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}   # set in shell or .env file to enable Slack alerts
     depends_on:
       - kafka

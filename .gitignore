@@ -1,0 +1,9 @@
+target/
+*.class
+*.jar
+*.war
+
+# Local-only config — never commit secrets
+**/application-local.yml
+**/application-local.properties
+.env
