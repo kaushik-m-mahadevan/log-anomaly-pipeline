@@ -1,0 +1,29 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: anomaly-detector-hpa
+  namespace: log-pipeline
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: anomaly-detector-service
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  # Scale down slowly — losing a pod means losing its in-memory window state.
+  # A 5-minute stabilisation window gives the remaining pods time to warm up
+  # before Kubernetes considers scaling down again.
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

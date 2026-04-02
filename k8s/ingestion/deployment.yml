@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-ingestion-service
+  namespace: log-pipeline
+  labels:
+    app: log-ingestion-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-ingestion-service
+  template:
+    metadata:
+      labels:
+        app: log-ingestion-service
+    spec:
+      containers:
+        - name: log-ingestion-service
+          # Local build: docker build -t log-ingestion-service:latest -f log-ingestion-service/Dockerfile .
+          #              then: docker tag log-ingestion-service:latest localhost:5001/log-ingestion-service:latest && docker push localhost:5001/log-ingestion-service:latest
+          # Production:  ghcr.io/kaushik-m-mahadevan/log-anomaly-pipeline/log-ingestion-service:latest
+          image: localhost:5001/log-ingestion-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: log-ingestion-config
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+          # startupProbe disables liveness kills until the JVM has fully started.
+          # Gives up to 30 * 10s = 5 minutes; then hands off to livenessProbe.
+          startupProbe:
+            tcpSocket:
+              port: 8080
+            failureThreshold: 45
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            periodSeconds: 20
+          # Matches spring.lifecycle.timeout-per-shutdown-phase: 30s
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+      terminationGracePeriodSeconds: 40

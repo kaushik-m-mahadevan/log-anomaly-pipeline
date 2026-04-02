@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: anomaly-detector-service
+  namespace: log-pipeline
+spec:
+  selector:
+    app: anomaly-detector-service
+  type: NodePort        # Exposes actuator endpoints (health, metrics) on localhost
+  ports:
+    - port: 8081
+      targetPort: 8081
+      nodePort: 30081   # curl http://localhost:30081/actuator/health

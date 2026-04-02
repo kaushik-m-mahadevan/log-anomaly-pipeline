@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-service
+  namespace: log-pipeline
+  labels:
+    app: alert-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alert-service
+  template:
+    metadata:
+      labels:
+        app: alert-service
+    spec:
+      initContainers:
+        - name: wait-for-ingestion
+          image: busybox:latest
+          command: ['sh', '-c', 'until wget -qO- http://log-ingestion-service:8080/actuator/health 2>/dev/null | grep -q "\"status\":\"UP\""; do echo "waiting for ingestion..."; sleep 15; done']
+      containers:
+        - name: alert-service
+          # Local build: docker build -t alert-service:latest -f alert-service/Dockerfile .
+          #              then: docker tag alert-service:latest localhost:5001/alert-service:latest && docker push localhost:5001/alert-service:latest
+          # Production:  ghcr.io/kaushik-m-mahadevan/log-anomaly-pipeline/alert-service:latest
+          image: localhost:5001/alert-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: alert-service-config
+            - secretRef:
+                name: alert-service-secrets   # injects SLACK_WEBHOOK_URL
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "768Mi"
+              cpu: "250m"
+          startupProbe:
+            tcpSocket:
+              port: 8082
+            failureThreshold: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8082
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8082
+            periodSeconds: 20
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+      terminationGracePeriodSeconds: 40

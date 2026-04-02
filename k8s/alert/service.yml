@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-service
+  namespace: log-pipeline
+spec:
+  selector:
+    app: alert-service
+  type: NodePort        # Exposes actuator endpoints on localhost
+  ports:
+    - port: 8082
+      targetPort: 8082
+      nodePort: 30082   # curl http://localhost:30082/actuator/health

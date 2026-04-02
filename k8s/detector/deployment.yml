@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anomaly-detector-service
+  namespace: log-pipeline
+  labels:
+    app: anomaly-detector-service
+spec:
+  replicas: 1
+  # NOTE: keep replicas=1 unless you add Redis for shared detector state.
+  # The Caffeine registry is in-process — multiple pods split the partition
+  # assignment, so each pod only sees a subset of services. One pod per
+  # partition group is the correct model until state is externalised.
+  selector:
+    matchLabels:
+      app: anomaly-detector-service
+  template:
+    metadata:
+      labels:
+        app: anomaly-detector-service
+    spec:
+      initContainers:
+        - name: wait-for-alert
+          image: busybox:latest
+          # Wait for alert-service (which itself waits for ingestion), giving all 3 JVMs sequential startup
+          command: ['sh', '-c', 'until wget -qO- http://alert-service:8082/actuator/health 2>/dev/null | grep -q "\"status\":\"UP\""; do echo "waiting for alert-service..."; sleep 15; done']
+      containers:
+        - name: anomaly-detector-service
+          # Local build: docker build -t anomaly-detector-service:latest -f anomaly-detector-service/Dockerfile .
+          #              then: docker tag anomaly-detector-service:latest localhost:5001/anomaly-detector-service:latest && docker push localhost:5001/anomaly-detector-service:latest
+          # Production:  ghcr.io/kaushik-m-mahadevan/log-anomaly-pipeline/anomaly-detector-service:latest
+          image: localhost:5001/anomaly-detector-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: anomaly-detector-config
+          resources:
+            requests:
+              memory: "128Mi"   # Caffeine registry holds up to 10k detector instances
+              cpu: "100m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+          startupProbe:
+            tcpSocket:
+              port: 8081
+            failureThreshold: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            periodSeconds: 20
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+      terminationGracePeriodSeconds: 40

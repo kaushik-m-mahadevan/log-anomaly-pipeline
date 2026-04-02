@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # 1. Namespace first
+  - namespace.yml
+
+  # 2. Kafka infrastructure (zookeeper must be ready before kafka)
+  - kafka/zookeeper.yml
+  - kafka/kafka.yml
+
+  # 3. Application services (all depend on kafka being available)
+  - ingestion/configmap.yml
+  - ingestion/deployment.yml
+  - ingestion/service.yml
+
+  - detector/configmap.yml
+  - detector/deployment.yml
+  - detector/service.yml
+  - detector/hpa.yml
+
+  - alert/configmap.yml
+  - alert/secret.yml
+  - alert/deployment.yml
+  - alert/service.yml

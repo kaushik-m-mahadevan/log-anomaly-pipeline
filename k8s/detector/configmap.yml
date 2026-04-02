@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anomaly-detector-config
+  namespace: log-pipeline
+data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=50.0"
+  KAFKA_REPLICATION_FACTOR: "1"
+  KAFKA_MAX_POLL_RECORDS: "100"
+  DETECTOR_WINDOW_SIZE: "30"
+  DETECTOR_SIGNAL_WINDOW_SIZE: "10"
+  DETECTOR_Z_SCORE_THRESHOLD: "2.0"

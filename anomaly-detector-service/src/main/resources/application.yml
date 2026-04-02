@@ -42,6 +42,11 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
 
 logging:
   level:

@@ -28,6 +28,11 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
 
 slack:
   # Set SLACK_WEBHOOK_URL env var (or override here) to enable Slack alerts.
