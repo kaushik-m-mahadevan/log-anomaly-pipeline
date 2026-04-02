@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @EmbeddedKafka(
-        partitions = 1,
+        partitions = 3,   // must match TopicConfig which creates anomaly-alerts with 3 partitions
         brokerProperties = {"listeners=PLAINTEXT://localhost:${kafka.embedded.port:19093}",
                             "port=${kafka.embedded.port:19093}"},
         topics = {"processed-logs", "anomaly-alerts", "processed-logs-dlt"}
@@ -147,7 +147,10 @@ class DetectorIntegrationTest {
 
         Map<String, Object> props = KafkaTestUtils.consumerProps(
                 "detector-integration-" + System.nanoTime(), "false", embeddedKafka);
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        // Use "latest" so each test only reads events published after its consumer subscribes.
+        // "earliest" replays the anomaly from the spike test into the allInfoEvents test.
+        // waitForAssignment() below ensures assignment is complete before any events are published.
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
 
         ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
         JsonDeserializer<AnomalyEvent> valueDeserializer = new JsonDeserializer<>(AnomalyEvent.class, mapper);

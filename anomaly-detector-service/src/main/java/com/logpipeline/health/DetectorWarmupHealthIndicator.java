@@ -38,10 +38,11 @@ public class DetectorWarmupHealthIndicator implements HealthIndicator {
         if (activeDetectors == 0) {
             return Health.outOfService()
                     .withDetail("status", "warming-up")
-                    .withDetail("activeDetectors", 0)
+                    .withDetail("activeDetectors", 0L)
                     .withDetail("message",
-                            "No log events received yet. Sliding windows are cold — "
-                          + "anomaly detection will begin once each service fills its window.")
+                            "warming-up: no log events received yet. "
+                          + "Sliding windows are cold — anomaly detection will begin "
+                          + "once each service fills its window.")
                     .build();
         }
 

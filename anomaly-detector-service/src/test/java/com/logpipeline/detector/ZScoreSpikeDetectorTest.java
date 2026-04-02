@@ -351,12 +351,13 @@ class ZScoreSpikeDetectorTest {
             baseline(10, false);
             signal(5, true);   // fires, anomalyActive = true
 
-            // Recovery: flood with INFO — Z-score drops to 0
+            // Recovery: flood with INFO — Z-score drops to 0, anomalyActive resets
             for (int i = 0; i < WINDOW; i++) detector.evaluate(info());
 
-            // New spike — should fire again
+            // New spike — window is already full (all INFO after recovery + baseline).
+            // The first error pushes signalRate above baseline, Z fires immediately.
             baseline(10, false);
-            Optional<AnomalyEvent> refire = signal(5, true);
+            Optional<AnomalyEvent> refire = detector.evaluate(error()); // first error fires
             assertThat(refire).isPresent();
         }
 
@@ -376,9 +377,9 @@ class ZScoreSpikeDetectorTest {
             // Recovery
             for (int i = 0; i < WINDOW; i++) detector.evaluate(info());
 
-            // Outage 2
+            // Outage 2 — window is full (all INFO after recovery). First error fires immediately.
             baseline(10, false);
-            Optional<AnomalyEvent> outage2 = signal(5, true);
+            Optional<AnomalyEvent> outage2 = detector.evaluate(error()); // first error fires
             assertThat(outage2).isPresent();
 
             // Both are real events with unique IDs
@@ -611,9 +612,9 @@ class ZScoreSpikeDetectorTest {
             // Phase 2: flush the window with INFO → re-arm and clean state
             for (int i = 0; i < WINDOW * 2; i++) detector.evaluate(info());
 
-            // Phase 3: clean baseline of all INFO, then spike — should fire fresh
+            // Phase 3: window is full (all INFO after flush). First error fires immediately.
             baseline(10, false);
-            Optional<AnomalyEvent> fresh = signal(5, true);
+            Optional<AnomalyEvent> fresh = detector.evaluate(error()); // first error fires
             assertThat(fresh).isPresent();
         }
 

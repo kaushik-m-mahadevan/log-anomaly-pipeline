@@ -130,21 +130,20 @@ class ErrorRateSpikeDetectorTest {
         detector.evaluate(errorEvent());
         detector.evaluate(infoEvent());
         detector.evaluate(infoEvent());
-        detector.evaluate(infoEvent()); // 2/5 = 40% → fires
+        detector.evaluate(infoEvent()); // 2/5 = 40% → fires, anomalyActive=true
 
         // Flood with INFO to push rate below threshold
-        detector.evaluate(infoEvent()); // 1/5 = 20% → re-arms
+        detector.evaluate(infoEvent()); // 1/5 = 20% → re-arms, anomalyActive=false
         detector.evaluate(infoEvent());
         detector.evaluate(infoEvent());
         detector.evaluate(infoEvent());
         detector.evaluate(infoEvent()); // 0/5 = 0% — fully recovered
 
-        // New spike — should fire again after recovery
-        detector.evaluate(errorEvent());
-        detector.evaluate(errorEvent());
-        detector.evaluate(infoEvent());
-        detector.evaluate(infoEvent());
-        Optional<AnomalyEvent> refire = detector.evaluate(infoEvent()); // 2/5 = 40% → fires again
+        // New spike — window is already full, so the fire happens as soon as the
+        // error rate hits threshold again (2nd error → 2/5 = 40%).
+        // Capture the result at that point rather than at the 5th event.
+        detector.evaluate(errorEvent());                                    // 1/5 = 20% — below threshold
+        Optional<AnomalyEvent> refire = detector.evaluate(errorEvent());   // 2/5 = 40% → fires again
         assertThat(refire).isPresent();
     }
 
@@ -164,9 +163,10 @@ class ErrorRateSpikeDetectorTest {
         // Recovery
         for (int i = 0; i < WINDOW_SIZE; i++) detector.evaluate(infoEvent());
 
-        // Outage 2
-        for (int i = 0; i < 4; i++) detector.evaluate(errorEvent());
-        Optional<AnomalyEvent> outage2 = detector.evaluate(errorEvent()); // 5/5 = 100%
+        // Outage 2 — window is full after recovery, so the fire happens as soon as
+        // the rate crosses the threshold again (2nd error → 2/5 = 40%), not at the 5th.
+        detector.evaluate(errorEvent());                                    // 1/5 = 20% — below
+        Optional<AnomalyEvent> outage2 = detector.evaluate(errorEvent()); // 2/5 = 40% → fires
         assertThat(outage2).isPresent();
 
         // Both anomaly IDs should be distinct (separate events)

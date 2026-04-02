@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @EmbeddedKafka(
-        partitions = 1,
+        partitions = 3,   // must match TopicConfig.processedLogsTopic() which hardcodes 3 partitions
         brokerProperties = {"listeners=PLAINTEXT://localhost:${kafka.embedded.port:19092}",
                             "port=${kafka.embedded.port:19092}"},
         topics = {"processed-logs"}
@@ -127,7 +127,12 @@ class LogIngestionIntegrationTest {
 
         Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(
                 "integration-test-group-" + System.nanoTime(), "false", embeddedKafka);
-        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        // Use "latest" so each test only reads messages published after the consumer subscribes.
+        // "earliest" would replay messages from prior tests in the same context, causing
+        // ingestSingle to receive svc-a/svc-b from ingestBatch instead of its own test-svc.
+        // waitForAssignment() below ensures the consumer is fully assigned before the test
+        // publishes, so no messages are missed.
+        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
 
         JsonDeserializer<LogEventMessage> valueDeserializer =
                 new JsonDeserializer<>(LogEventMessage.class);

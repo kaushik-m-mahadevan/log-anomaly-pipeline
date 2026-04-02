@@ -9,6 +9,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.List;
@@ -93,6 +94,23 @@ public class GlobalExceptionHandler {
                         "status", 400,
                         "error", "Malformed request body",
                         "details", List.of("Check JSON syntax and field types"),
+                        "timestamp", Instant.now().toString()
+                ));
+    }
+
+    /**
+     * Handles ResponseStatusException — preserves the HTTP status code set by the caller.
+     * Must be declared before the Exception catch-all, otherwise the catch-all intercepts
+     * it first and always returns 500 (e.g. the rate-limiter's 429 would be swallowed).
+     */
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, Object>> handleResponseStatus(ResponseStatusException ex) {
+        log.warn("Request rejected [status={}, reason={}]", ex.getStatusCode(), ex.getReason());
+        return ResponseEntity
+                .status(ex.getStatusCode())
+                .body(Map.of(
+                        "status", ex.getStatusCode().value(),
+                        "error",  ex.getReason() != null ? ex.getReason() : "Request rejected",
                         "timestamp", Instant.now().toString()
                 ));
     }
