@@ -50,11 +50,14 @@ spec:
               path: /actuator/health/readiness
               port: 8082
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: 8082
             periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
           lifecycle:
             preStop:
               exec:
