@@ -41,12 +41,12 @@ spec:
               memory: "128Mi"   # Caffeine registry holds up to 10k detector instances
               cpu: "100m"
             limits:
-              memory: "768Mi"
+              memory: "1024Mi"
               cpu: "500m"
           startupProbe:
             tcpSocket:
               port: 8081
-            failureThreshold: 60
+            failureThreshold: 90
             periodSeconds: 10
           readinessProbe:
             httpGet:
